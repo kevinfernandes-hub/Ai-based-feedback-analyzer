@@ -1,108 +1,242 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>NBA Attainment Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f8fafc;
             color: #0f172a;
         }
+
         .saas-bg {
             background-image: radial-gradient(circle 800px at 50% 200px, #e0f2fe, transparent);
         }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
     </style>
 </head>
+
 <body class="saas-bg h-screen flex overflow-hidden">
     <aside class="w-64 bg-white border-r border-slate-200 flex flex-col z-20">
-        <div class="p-6 border-b border-slate-100"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">C</div><span class="font-bold text-lg text-slate-800 tracking-tight">OBE System</span></div></div>
-        <div class="p-4 flex-grow overflow-y-auto custom-scrollbar"><div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Events / Courses</div><div id="formsList" class="space-y-1"></div></div>
-        <div class="p-4 border-t border-slate-100"><a href="/logout" class="block w-full py-2 text-center text-xs font-bold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition">Logout</a></div>
+        <div class="p-6 border-b border-slate-100">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">C
+                </div><span class="font-bold text-lg text-slate-800 tracking-tight">OBE System</span>
+            </div>
+        </div>
+        <div class="p-4 flex-grow overflow-y-auto custom-scrollbar">
+            <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Events / Courses</div>
+            <div id="formsList" class="space-y-1"></div>
+        </div>
+        <div class="p-4 border-t border-slate-100"><a href="/logout"
+                class="block w-full py-2 text-center text-xs font-bold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition">Logout</a>
+        </div>
     </aside>
 
     <main class="flex-1 flex flex-col relative overflow-hidden">
-        <header class="bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-4 flex justify-between items-center z-10 sticky top-0">
-            <div><h2 class="text-xl font-bold text-slate-800">Accreditation Dashboard</h2><p class="text-xs text-slate-500">OBE Multi-Mapping Analysis</p></div>
-            <button onclick="document.getElementById('builderModal').classList.remove('hidden')" class="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition flex items-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Create Form</button>
+        <header
+            class="bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-4 flex justify-between items-center z-10 sticky top-0">
+            <div>
+                <h2 class="text-xl font-bold text-slate-800">Accreditation Dashboard</h2>
+                <p class="text-xs text-slate-500">OBE Multi-Mapping Analysis</p>
+            </div>
+            <button onclick="document.getElementById('builderModal').classList.remove('hidden')"
+                class="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition flex items-center gap-2 shadow-md"><i
+                    class="ph-bold ph-plus-circle"></i> Create Form</button>
         </header>
 
         <div class="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-            
-            <div id="analyticsHeader" class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center hidden">
-                <div><h3 class="text-2xl font-bold text-slate-800" id="selectedFormTitle">Course Name</h3><p class="text-xs text-slate-500" id="selectedEventTitle">Event Title</p></div>
+
+            <div id="analyticsHeader"
+                class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center hidden">
+                <div>
+                    <h3 class="text-2xl font-bold text-slate-800" id="selectedFormTitle">Course Name</h3>
+                    <p class="text-xs text-slate-500" id="selectedEventTitle">Event Title</p>
+                </div>
                 <div class="flex gap-4 items-center">
-                    <a id="downloadPdfBtn" href="#" class="px-4 py-2 bg-red-50 text-red-600 border border-red-100 text-sm font-bold rounded-lg hover:bg-red-100 transition shadow-sm flex items-center gap-2"><i class="ph-bold ph-file-pdf"></i> Export PDF</a>
-                    <a id="downloadCsvBtn" href="#" class="px-4 py-2 bg-white text-slate-700 border border-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 transition shadow-sm flex items-center gap-2"><i class="ph-bold ph-file-csv"></i> Export CSV</a>
+                    <a id="downloadPdfBtn" href="#"
+                        class="px-4 py-2 bg-red-50 text-red-600 border border-red-100 text-sm font-bold rounded-lg hover:bg-red-100 transition shadow-sm flex items-center gap-2"><i
+                            class="ph-bold ph-file-pdf"></i> Export PDF</a>
+                    <a id="downloadCsvBtn" href="#"
+                        class="px-4 py-2 bg-white text-slate-700 border border-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 transition shadow-sm flex items-center gap-2"><i
+                            class="ph-bold ph-file-csv"></i> Export CSV</a>
                 </div>
             </div>
 
             <div class="grid grid-cols-2 gap-6">
                 <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                    <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-2xl"><i class="ph-fill ph-users"></i></div>
-                    <div><p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Students Evaluated</p><h2 class="text-3xl font-bold text-slate-800 mt-1" id="totalStudents">0</h2></div>
+                    <div
+                        class="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-2xl">
+                        <i class="ph-fill ph-users"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Students Evaluated
+                        </p>
+                        <h2 class="text-3xl font-bold text-slate-800 mt-1" id="totalStudents">0</h2>
+                    </div>
                 </div>
                 <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                    <div class="w-12 h-12 bg-green-50 text-green-600 rounded-full flex items-center justify-center text-2xl"><i class="ph-fill ph-smiley"></i></div>
-                    <div><p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Primary Class Sentiment</p><h2 class="text-3xl font-bold text-slate-800 mt-1" id="classSentiment">Neutral</h2></div>
+                    <div
+                        class="w-12 h-12 bg-green-50 text-green-600 rounded-full flex items-center justify-center text-2xl">
+                        <i class="ph-fill ph-smiley"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Primary Class Sentiment</p>
+                        <h2 class="text-3xl font-bold text-slate-800 mt-1" id="classSentiment">Neutral</h2>
+                    </div>
                 </div>
             </div>
 
+            <!-- ANALYTICS CHARTS -->
+            <div class="grid grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[300px]">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Sentiment Distribution
+                    </h3>
+                    <div class="h-[210px] relative"><canvas id="pieChart"></canvas></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[300px]">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Outcome Mapping Coverage
+                    </h3>
+                    <div class="h-[210px] relative"><canvas id="barChart"></canvas></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[300px]">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Top Attained Outcomes
+                    </h3>
+                    <div class="h-[210px] relative"><canvas id="lineChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- TOP PERFORMING OUTCOMES CHART -->
+            <div id="topPerformingCard" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center"><i
+                            class="ph-fill ph-chart-line-up"></i></div>
+                    <h3 class="font-bold text-slate-800">Top Performing Outcomes</h3>
+                </div>
+                <div class="h-[220px] relative"><canvas id="topChart"></canvas></div>
+            </div>
+
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center"><h3 class="font-bold text-slate-800">Part 1: Outcome Attainment</h3><span class="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded">Target: Level 3 (>70%)</span></div>
+                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800">Part 1: Outcome Attainment</h3><span
+                        class="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded">Target: Level 3
+                        (>70%)</span>
+                </div>
                 <table class="w-full text-left border-collapse">
                     <thead class="bg-slate-50 text-xs font-bold text-slate-500 uppercase">
-                        <tr><th class="px-6 py-3 border-b">Outcome</th><th class="px-6 py-3 border-b">Evaluation Points</th><th class="px-6 py-3 border-b">Avg Score</th><th class="px-6 py-3 border-b">Attainment %</th><th class="px-6 py-3 border-b">NBA Level</th></tr>
+                        <tr>
+                            <th class="px-6 py-3 border-b">Outcome</th>
+                            <th class="px-6 py-3 border-b">Eval Points</th>
+                            <th class="px-6 py-3 border-b">Avg Score</th>
+                            <th class="px-6 py-3 border-b w-[220px]">Attainment</th>
+                            <th class="px-6 py-3 border-b">NBA Level</th>
+                        </tr>
                     </thead>
                     <tbody id="attainmentTable" class="text-sm text-slate-700"></tbody>
                 </table>
             </div>
 
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50"><h3 class="font-bold text-slate-800">Part 2: Question-Wise Breakdown</h3></div>
+                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h3 class="font-bold text-slate-800">Part 2: Question-Wise Breakdown</h3>
+                </div>
                 <table class="w-full text-left border-collapse">
                     <thead class="bg-slate-50 text-xs font-bold text-slate-500 uppercase">
-                        <tr><th class="px-6 py-3 border-b w-1/2">Question</th><th class="px-6 py-3 border-b">Multi-Mapped To</th><th class="px-6 py-3 border-b">Type</th><th class="px-6 py-3 border-b">Avg / Attainment</th></tr>
+                        <tr>
+                            <th class="px-6 py-3 border-b w-1/2">Question</th>
+                            <th class="px-6 py-3 border-b">Multi-Mapped To</th>
+                            <th class="px-6 py-3 border-b">Type</th>
+                            <th class="px-6 py-3 border-b">Avg / Attainment</th>
+                        </tr>
                     </thead>
                     <tbody id="questionTable" class="text-sm text-slate-700"></tbody>
                 </table>
             </div>
-            
+
+            <!-- AI INTELLIGENCE DASHBOARD -->
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                        <div
+                            class="w-8 h-8 bg-purple-50 text-purple-600 rounded-lg flex items-center justify-center text-lg">
+                            <i class="ph-fill ph-brain"></i>
+                        </div>
+                        <h3 class="font-bold text-slate-800">AI Intelligence Dashboard</h3>
+                    </div>
+                    <button id="aiSummaryBtn" onclick="generateAiSummary()"
+                        class="text-xs font-bold text-purple-600 bg-purple-50 px-4 py-2 rounded-lg hover:bg-purple-100 transition flex items-center gap-2">
+                        <i class="ph-bold ph-magic-wand"></i> Generate AI Summary
+                    </button>
+                </div>
+                <div id="aiSummaryContainer" class="hidden animate-pulse">
+                    <div class="h-4 bg-slate-100 rounded w-3/4 mb-2"></div>
+                    <div class="h-4 bg-slate-100 rounded w-1/2 mb-2"></div>
+                    <div class="h-4 bg-slate-100 rounded w-2/3"></div>
+                </div>
+                <div id="aiSummaryResult"
+                    class="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100 hidden">
+                    <!-- AI Content will appear here -->
+                </div>
+            </div>
+
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[400px]">
-                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50"><h3 class="font-bold text-slate-800">Recent Student Feedback</h3></div>
-                <div id="responsesList" class="overflow-y-auto flex-grow p-4 space-y-2 custom-scrollbar"><p class="text-center text-slate-400 text-sm mt-20">No feedback yet.</p></div>
+                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h3 class="font-bold text-slate-800">Recent Student Feedback</h3>
+                </div>
+                <div id="responsesList" class="overflow-y-auto flex-grow p-4 space-y-2 custom-scrollbar">
+                    <p class="text-center text-slate-400 text-sm mt-20">No feedback yet.</p>
+                </div>
             </div>
 
         </div>
     </main>
 
     <!-- FORM BUILDER MODAL (Wider to fit dropdowns) -->
-    <div id="builderModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div id="builderModal"
+        class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl w-full max-w-5xl shadow-2xl relative flex flex-col max-h-[90vh]">
             <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                <h2 class="text-xl font-bold text-slate-800">Create Form & Define Outcomes</h2>
-                <button onclick="document.getElementById('builderModal').classList.add('hidden')" class="text-slate-400 hover:text-red-500 text-2xl font-bold">&times;</button>
+                <h2 class="text-xl font-bold text-slate-800" id="modalTitle">Create Form & Define Outcomes</h2>
+                <button onclick="closeBuilderModal()"
+                    class="text-slate-400 hover:text-red-500 text-2xl font-bold">&times;</button>
             </div>
-            
+
             <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
                 <div class="grid grid-cols-2 gap-4 mb-6">
                     <div>
                         <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Event Title</label>
-                        <input type="text" id="formTitleInput" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500" placeholder="e.g., Mid-Sem Feedback, Exit Survey">
+                        <input type="text" id="formTitleInput"
+                            class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500"
+                            placeholder="e.g., Mid-Sem Feedback, Exit Survey">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Course Name</label>
-                        <select id="courseNameInput" onchange="handleCourseChange()" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500">
+                        <select id="courseNameInput" onchange="handleCourseChange()"
+                            class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500">
                             <option value="" disabled selected>Select Subject / Event...</option>
                             <option value="Theory of Computation">Theory of Computation</option>
-                            <option value="Software Engineering and Project Management">Software Engineering and Project Management</option>
-                            <option value="Software Engineering & Project Management Lab">Software Engineering & Project Management Lab</option>
+                            <option value="Software Engineering and Project Management">Software Engineering and Project
+                                Management</option>
+                            <option value="Software Engineering & Project Management Lab">Software Engineering & Project
+                                Management Lab</option>
                             <option value="Operating System">Operating System</option>
                             <option value="Operating System Lab">Operating System Lab</option>
                             <option value="Computer Graphics (PE-I)">Computer Graphics (PE-I)</option>
@@ -111,29 +245,35 @@
                             <option value="OE-II Object Oriented Programming">OE-II Object Oriented Programming</option>
                             <option value="Technical Skill Development-II">Technical Skill Development-II</option>
                             <option value="Career Development - V">Career Development - V</option>
-                            <option value="MDM-III Introduction to Business Management">MDM-III Introduction to Business Management</option>
+                            <option value="MDM-III Introduction to Business Management">MDM-III Introduction to Business
+                                Management</option>
                             <option value="Events">Events</option>
                             <option value="Others">Others</option>
                         </select>
                     </div>
                 </div>
-                
+
                 <div class="flex justify-between items-center mb-3">
                     <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Questions & Mapping</span>
-                    <button onclick="addQuestion()" class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded hover:bg-blue-100 transition shadow-sm">+ Add Question</button>
+                    <button onclick="addQuestion()"
+                        class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded hover:bg-blue-100 transition shadow-sm">+
+                        Add Question</button>
                 </div>
-                
+
                 <div id="questionsContainer" class="space-y-4"></div>
             </div>
-            
+
             <div class="p-6 border-t border-slate-100 bg-white rounded-b-2xl">
-                <button onclick="saveForm()" class="w-full py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition shadow-lg flex justify-center items-center gap-2">Launch Form <i class="ph-bold ph-rocket-launch"></i></button>
+                <button onclick="saveForm()"
+                    class="w-full py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition shadow-lg flex justify-center items-center gap-2"
+                    id="saveFormBtn">Launch
+                    Form <i class="ph-bold ph-rocket-launch"></i></button>
             </div>
         </div>
     </div>
 
     <script>
-        let questions = [], currentFormId = null;
+        let questions = [], currentFormId = null, editingFormId = null;
         let openDropdowns = new Set(); // Keeps track of which dropdowns are open
 
         // Hardcoded Dictionary of College Specific COs
@@ -165,11 +305,11 @@
             renderBuilder();
         }
 
-        window.handleCourseChange = function() {
+        window.handleCourseChange = function () {
             const courseName = document.getElementById('courseNameInput').value;
             const courseCOs = COURSE_DATA[courseName] || [];
             const maxCo = courseCOs.length > 0 ? courseCOs.length : 6;
-            
+
             questions.forEach(q => {
                 if (q.mappings) {
                     q.mappings = q.mappings.filter(m => {
@@ -185,20 +325,20 @@
         }
 
         // FIXED DROPDOWN LOGIC
-        window.toggleDropdown = function(id) {
+        window.toggleDropdown = function (id) {
             if (openDropdowns.has(id)) openDropdowns.delete(id);
             else openDropdowns.add(id);
             renderBuilder();
         }
 
-        window.toggleMap = function(qIdx, mapKey) {
+        window.toggleMap = function (qIdx, mapKey) {
             const q = questions[qIdx];
             if (!q.mappings) q.mappings = [];
             const idx = q.mappings.indexOf(mapKey);
             if (idx > -1) q.mappings.splice(idx, 1);
             else q.mappings.push(mapKey);
             // Keeps dropdown open because openDropdowns set is preserved
-            renderBuilder(); 
+            renderBuilder();
         }
 
         function getDropdownHtml(qIdx, type, list, currentMappings) {
@@ -233,9 +373,9 @@
         }
 
         function renderBuilder() {
-            const c = document.getElementById('questionsContainer'); 
+            const c = document.getElementById('questionsContainer');
             c.innerHTML = '';
-            
+
             const courseName = document.getElementById('courseNameInput').value;
             const courseCOs = (courseName && COURSE_DATA[courseName]) ? COURSE_DATA[courseName] : [];
             const dynamicCoList = courseCOs.length > 0 ? courseCOs : ["CO1", "CO2", "CO3", "CO4", "CO5", "CO6"];
@@ -251,9 +391,9 @@
                         <div class="flex gap-3">
                             <input class="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition focus:bg-white" placeholder="Enter Question to be asked..." value="${q.text}" onchange="updateQ(${i}, 'text', this.value)">
                             <select class="w-48 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 outline-none focus:border-blue-500 transition focus:bg-white" onchange="updateQ(${i}, 'type', this.value)">
-                                <option value="rating_3" ${q.type==='rating_3'?'selected':''}>Rating (1, 2, 3)</option>
-                                <option value="rating_5" ${q.type==='rating_5'?'selected':''}>Rating (1 to 5)</option>
-                                <option value="text" ${q.type==='text'?'selected':''}>Text Comment</option>
+                                <option value="rating_3" ${q.type === 'rating_3' ? 'selected' : ''}>Rating (1, 2, 3)</option>
+                                <option value="rating_5" ${q.type === 'rating_5' ? 'selected' : ''}>Rating (1 to 5)</option>
+                                <option value="text" ${q.type === 'text' ? 'selected' : ''}>Text Comment</option>
                             </select>
                         </div>
                         
@@ -280,17 +420,50 @@
         async function saveForm() {
             const title = document.getElementById('formTitleInput').value;
             const course = document.getElementById('courseNameInput').value;
-            if(!title || !course) return alert("Event Title and Course Name are required");
-            
-            await fetch('/api/create_form', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, course_name: course, questions }) });
-            document.getElementById('builderModal').classList.add('hidden'); 
-            
-            // Reset form after saving
-            openDropdowns.clear(); 
-            questions = [{ text: "", type: "rating_3", mappings: [] }];
-            document.getElementById('formTitleInput').value = ""; document.getElementById('courseNameInput').value = "";
-            
+            if (!title || !course) return alert("Event Title and Course Name are required");
+
+            if (editingFormId) {
+                await fetch('/api/update_form', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editingFormId, title, course_name: course, questions }) });
+            } else {
+                await fetch('/api/create_form', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, course_name: course, questions }) });
+            }
+            closeBuilderModal();
             loadForms();
+        }
+
+        function closeBuilderModal() {
+            document.getElementById('builderModal').classList.add('hidden');
+            editingFormId = null;
+            openDropdowns.clear();
+            questions = [{ text: "", type: "rating_3", mappings: [] }];
+            document.getElementById('formTitleInput').value = '';
+            document.getElementById('courseNameInput').value = '';
+            document.getElementById('modalTitle').innerText = 'Create Form & Define Outcomes';
+            document.getElementById('saveFormBtn').innerHTML = 'Launch Form <i class="ph-bold ph-rocket-launch"></i>';
+            document.getElementById('saveFormBtn').className = document.getElementById('saveFormBtn').className.replace('bg-amber-500 hover:bg-amber-600', 'bg-blue-600 hover:bg-blue-700');
+            renderBuilder();
+        }
+
+        async function editForm(event, formId) {
+            event.stopPropagation();
+            const res = await fetch(`/api/forms?t=${Date.now()}`);
+            const forms = await res.json();
+            const form = forms.find(f => f.id === formId);
+            if (!form) return;
+
+            editingFormId = formId;
+            questions = (form.structure || []).map(q => ({ text: q.text || '', type: q.type || 'rating_3', mappings: q.mappings || [] }));
+            openDropdowns.clear();
+
+            document.getElementById('formTitleInput').value = form.title || '';
+            document.getElementById('courseNameInput').value = form.course_name || '';
+            document.getElementById('modalTitle').innerText = 'Edit Form & Define Outcomes';
+            const btn = document.getElementById('saveFormBtn');
+            btn.innerHTML = 'Save Changes <i class="ph-bold ph-floppy-disk"></i>';
+            btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-amber-500 hover:bg-amber-600');
+
+            renderBuilder();
+            document.getElementById('builderModal').classList.remove('hidden');
         }
 
         async function loadForms() {
@@ -300,15 +473,29 @@
                 const list = document.getElementById('formsList'); list.innerHTML = '';
                 forms.forEach(f => {
                     const activeClass = currentFormId === f.id ? 'border-blue-500 bg-blue-50 shadow-sm ring-1 ring-blue-500' : 'border-slate-100 bg-white hover:border-blue-200';
-                    list.innerHTML += `<div class="p-4 rounded-xl border ${activeClass} cursor-pointer transition mb-2" onclick="selectForm(${f.id}, '${f.title}', '${f.course_name}')"><div class="flex justify-between items-start"><div><span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">${f.course_name}</span><span class="font-bold text-sm text-slate-800">${f.title}</span></div><span class="text-[10px] px-2 py-0.5 rounded-full ${f.is_active?'bg-green-100 text-green-700':'bg-slate-100 text-slate-500'}">${f.is_active?'Active':'Closed'}</span></div></div>`;
+                    list.innerHTML += `<div class="p-4 rounded-xl border ${activeClass} cursor-pointer transition mb-2" onclick="selectForm(${f.id}, '${f.title}', '${f.course_name}')">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1 min-w-0">
+                                <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">${f.course_name}</span>
+                                <span class="font-bold text-sm text-slate-800 truncate block">${f.title}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                                <span class="text-[10px] px-2 py-0.5 rounded-full ${f.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}">${f.is_active ? 'Active' : 'Closed'}</span>
+                                <button onclick="editForm(event, ${f.id})" title="Edit Form" class="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-amber-100 hover:text-amber-600 text-slate-400 transition text-xs">
+                                    <i class="ph-bold ph-pencil-simple"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>`;
                 });
-            } catch(e) {
-                console.log("Could not load forms - API backend required for this feature.");
+            } catch (e) {
+                console.error("Error loading forms:", e);
+                document.getElementById('formsList').innerHTML = '<p class="text-xs text-red-500 p-2">Error loading forms. Check console.</p>';
             }
         }
 
         function selectForm(id, title, course) {
-            currentFormId = id; 
+            currentFormId = id;
             document.getElementById('selectedFormTitle').innerText = course;
             document.getElementById('selectedEventTitle').innerText = title;
             document.getElementById('analyticsHeader').classList.remove('hidden');
@@ -317,26 +504,89 @@
             loadForms(); loadAttainment(id);
         }
 
-        // Chart Initializations
-        const pieCtx = document.getElementById('pieChart').getContext('2d');
-        const barCtx = document.getElementById('barChart').getContext('2d');
-        const lineCtx = document.getElementById('lineChart').getContext('2d');
-        let pieChart = new Chart(pieCtx, { type: 'doughnut', data: { labels: ['Pos','Neu','Neg'], datasets: [{ data: [0,0,0], backgroundColor: ['#22c55e','#94a3b8','#ef4444'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } } });
-        let barChart = new Chart(barCtx, { type: 'bar', data: { labels: ['1','2','3','4','5'], datasets: [{ data: [0,0,0,0,0], backgroundColor: '#3b82f6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
-        let lineChart = new Chart(lineCtx, { type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#8b5cf6', tension: 0.4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+        // Chart Initializations with Safety Checks
+        let pieChart, barChart, lineChart, topChart;
+        function initCharts() {
+            const pEl = document.getElementById('pieChart'), bEl = document.getElementById('barChart'), lEl = document.getElementById('lineChart'), tEl = document.getElementById('topChart');
+            if (pEl) pieChart = new Chart(pEl.getContext('2d'), { type: 'doughnut', data: { labels: ['Pos', 'Neu', 'Neg'], datasets: [{ data: [0, 0, 0], backgroundColor: ['#22c55e', '#94a3b8', '#ef4444'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } } });
+            if (bEl) barChart = new Chart(bEl.getContext('2d'), { type: 'bar', data: { labels: ['CO', 'PO', 'PSO', 'PEO'], datasets: [{ label: 'Count', data: [0, 0, 0, 0], backgroundColor: '#3b82f6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } } });
+            if (lEl) lineChart = new Chart(lEl.getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Attainment %', data: [], backgroundColor: '#8b5cf6', borderRadius: 4 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, max: 100 } } } });
+            if (tEl) topChart = new Chart(tEl.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Attainment %',
+                        data: [],
+                        borderColor: '#1d4ed8',
+                        borderWidth: 3,
+                        pointBackgroundColor: '#1d4ed8',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        tension: 0,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y}%` } } },
+                    scales: {
+                        x: { grid: { color: '#e2e8f0', drawBorder: false }, ticks: { font: { weight: 'bold', size: 11 }, color: '#64748b' } },
+                        y: { beginAtZero: true, max: 100, grid: { color: '#e2e8f0', drawBorder: false }, ticks: { callback: v => v, color: '#64748b' }, border: { display: false } }
+                    }
+                }
+            });
+        }
+        initCharts();
+
 
         async function loadAttainment(formId) {
-            if(!formId) return;
+            if (!formId) return;
             try {
                 const res = await fetch(`/api/attainment?form_id=${formId}&t=${Date.now()}`);
                 const data = await res.json();
-                
+
                 document.getElementById('totalStudents').innerText = data.total || 0;
-                
-                // 1. OBE TABLE
+
+                // 1. OBE TABLE with inline progress bars
                 const tbody = document.getElementById('attainmentTable'); tbody.innerHTML = '';
                 if (data.stats.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">No data.</td></tr>';
-                else data.stats.forEach(r => tbody.innerHTML += `<tr class="border-b border-slate-50"><td class="px-6 py-4 font-mono font-bold text-blue-600">${r.code}</td><td class="px-6 py-4 text-slate-500"><i class="ph-fill ph-crosshair mr-1"></i> ${r.student_count} Eval Pts</td><td class="px-6 py-4 font-bold text-slate-800">${r.avg}</td><td class="px-6 py-4">${r.pct}%</td><td class="px-6 py-4"><span class="px-3 py-1 rounded text-xs font-bold ${r.color}">${r.level}</span></td></tr>`);
+                else data.stats.forEach(r => {
+                    const barColor = r.pct >= 70 ? '#22c55e' : r.pct >= 60 ? '#eab308' : '#ef4444';
+                    const badgeInfo = r.pct >= 70
+                        ? { cls: 'bg-green-100 text-green-700 border border-green-200', icon: 'ph-check-circle', label: 'L3 (High)' }
+                        : r.pct >= 60
+                            ? { cls: 'bg-yellow-100 text-yellow-700 border border-yellow-200', icon: 'ph-minus-circle', label: 'L2 (Moderate)' }
+                            : { cls: 'bg-red-100 text-red-700 border border-red-200', icon: 'ph-x-circle', label: 'L1 (Low)' };
+                    tbody.innerHTML += `<tr class="border-b border-slate-50 hover:bg-slate-50 transition">
+                        <td class="px-6 py-4 font-mono font-bold text-blue-600 text-sm">${r.code}</td>
+                        <td class="px-6 py-4 text-slate-500 text-sm"><i class="ph-fill ph-crosshair mr-1 text-slate-400"></i>${r.student_count}</td>
+                        <td class="px-6 py-4 font-bold text-slate-800 text-sm">${r.avg}</td>
+                        <td class="px-6 py-4">
+                            <div class="flex items-center gap-2">
+                                <div class="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div class="h-2 rounded-full transition-all duration-700" style="width:${r.pct}%;background:${barColor}"></div>
+                                </div>
+                                <span class="text-xs font-bold text-slate-700 w-10 text-right">${r.pct}%</span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4"><span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${badgeInfo.cls}"><i class="ph-fill ${badgeInfo.icon}"></i>${badgeInfo.label}</span></td>
+                    </tr>`;
+                });
+
+                // TOP PERFORMING CHART
+                const topCard = document.getElementById('topPerformingCard');
+                if (data.stats && data.stats.length > 0 && topChart) {
+                    topCard.classList.remove('hidden');
+                    const sorted = [...data.stats].sort((a, b) => b.pct - a.pct).slice(0, 8);
+                    topChart.data.labels = sorted.map(d => d.code);
+                    topChart.data.datasets[0].data = sorted.map(d => d.pct);
+                    topChart.update();
+                } else {
+                    topCard.classList.add('hidden');
+                }
 
                 // 2. QUESTION TABLE
                 const qbody = document.getElementById('questionTable'); qbody.innerHTML = '';
@@ -345,11 +595,11 @@
                     let scoreHtml = q.type.startsWith('rating')
                         ? `<span class="font-bold text-slate-800">${q.avg}</span> <span class="text-slate-400 text-xs ml-1">(${q.pct}% Attainment)</span>`
                         : `<span class="text-slate-500 text-xs font-medium">${q.count} Written Comments</span>`;
-                    
-                    let mapPills = q.mappings.map(m => `<span class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded text-[10px] text-slate-600">${m}</span>`).join(' ');
-                    if(!mapPills) mapPills = `<span class="text-xs text-slate-400 italic">None</span>`;
 
-                    qbody.innerHTML += `<tr class="border-b border-slate-50 hover:bg-slate-50"><td class="px-6 py-4 font-medium text-slate-700">${i+1}. ${q.text}</td><td class="px-6 py-4 font-mono flex flex-wrap gap-1">${mapPills}</td><td class="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">${q.type.replace('_', ' ')}</td><td class="px-6 py-4">${scoreHtml}</td></tr>`;
+                    let mapPills = q.mappings.map(m => `<span class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded text-[10px] text-slate-600">${m}</span>`).join(' ');
+                    if (!mapPills) mapPills = `<span class="text-xs text-slate-400 italic">None</span>`;
+
+                    qbody.innerHTML += `<tr class="border-b border-slate-50 hover:bg-slate-50"><td class="px-6 py-4 font-medium text-slate-700">${i + 1}. ${q.text}</td><td class="px-6 py-4 font-mono flex flex-wrap gap-1">${mapPills}</td><td class="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">${q.type.replace('_', ' ')}</td><td class="px-6 py-4">${scoreHtml}</td></tr>`;
                 });
 
                 // 3. SENTIMENT FEED
@@ -357,22 +607,90 @@
                 if (data.responses.length === 0) list.innerHTML = '<p class="text-center text-slate-400 text-sm mt-10">No feedback yet.</p>';
                 data.responses.forEach(r => {
                     let qa = JSON.parse(r.answers_json).map(a => `<div class="truncate text-xs mt-1"><span class="font-bold text-slate-700">${a.question}:</span> <span class="text-slate-600">${a.answer}</span></div>`).join('');
-                    let color = r.sentiment_label==='Positive'?'text-green-600 bg-green-50':r.sentiment_label==='Negative'?'text-red-600 bg-red-50':'text-slate-500 bg-slate-50';
+                    let color = r.sentiment_label === 'Positive' ? 'text-green-600 bg-green-50' : r.sentiment_label === 'Negative' ? 'text-red-600 bg-red-50' : 'text-slate-500 bg-slate-50';
                     list.innerHTML += `<div class="p-3 bg-white border border-slate-100 rounded-xl mb-2"><div class="flex justify-between mb-1"><div class="font-bold text-sm">${r.student_name}</div><span class="text-[10px] font-bold px-2 py-0.5 rounded uppercase ${color}">${r.sentiment_label}</span></div>${qa}</div>`;
                 });
-                
-                if (data.sentiment) {
+
+                if (data.sentiment && pieChart) {
+                    pieChart.data.datasets[0].data = [data.sentiment.pos, data.sentiment.neu, data.sentiment.neg];
+                    pieChart.update();
+
                     let maxSent = "Neutral 😐";
                     if (data.sentiment.pos > data.sentiment.neu && data.sentiment.pos > data.sentiment.neg) maxSent = "Positive 😊";
                     else if (data.sentiment.neg > data.sentiment.neu && data.sentiment.neg > data.sentiment.pos) maxSent = "Negative 😞";
                     document.getElementById('classSentiment').innerText = maxSent;
                 }
 
-            } catch(e) { console.error("Error fetching data:", e); }
+                // 4. MAPPING COVERAGE CHART
+                if (data.question_stats && barChart) {
+                    let counts = { 'CO': 0, 'PO': 0, 'PSO': 0, 'PEO': 0 };
+                    data.question_stats.forEach(q => {
+                        (q.mappings || []).forEach(m => {
+                            if (m.startsWith('CO')) counts['CO']++;
+                            else if (m.startsWith('PO')) counts['PO']++;
+                            else if (m.startsWith('PSO')) counts['PSO']++;
+                            else if (m.startsWith('PEO')) counts['PEO']++;
+                        });
+                    });
+                    barChart.data.datasets[0].data = [counts['CO'], counts['PO'], counts['PSO'], counts['PEO']];
+                    barChart.update();
+                }
+
+                // 5. TOP ATTAINED OUTCOMES CHART
+                if (data.stats && lineChart) {
+                    let top5 = [...data.stats]
+                        .sort((a, b) => b.pct - a.pct)
+                        .slice(0, 5);
+
+                    lineChart.data.labels = top5.map(d => d.code);
+                    lineChart.data.datasets[0].data = top5.map(d => d.pct);
+                    lineChart.update();
+                }
+
+
+            } catch (e) {
+                console.error("Error fetching attainment data:", e);
+                alert("Failed to load analytics data. Check server logs or console.");
+            }
+        }
+
+        async function generateAiSummary() {
+            if (!currentFormId) return alert("Please select a form first");
+
+            const btn = document.getElementById('aiSummaryBtn');
+            const container = document.getElementById('aiSummaryContainer');
+            const result = document.getElementById('aiSummaryResult');
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph-bold ph-circle-notch animate-spin"></i> Generating...';
+            container.classList.remove('hidden');
+            result.classList.add('hidden');
+
+            try {
+                const res = await fetch(`/api/ai_summary?form_id=${currentFormId}`);
+                const data = await res.json();
+
+                if (data.summary) {
+                    result.innerHTML = marked.parse(data.summary);
+                    result.classList.remove('hidden');
+                } else if (data.error) {
+                    result.innerHTML = `<p class="text-red-500 font-bold">${data.error}</p>`;
+                    result.classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error("AI Error:", e);
+                result.innerHTML = `<p class="text-red-500 font-bold">Failed to connect to AI engine.</p>`;
+                result.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ph-bold ph-magic-wand"></i> Regenerate AI Summary';
+                container.classList.add('hidden');
+            }
         }
 
         loadForms();
         setInterval(() => { if (currentFormId) loadAttainment(currentFormId); }, 3000);
     </script>
 </body>
+
 </html>

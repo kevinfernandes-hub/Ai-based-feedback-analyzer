@@ -8,6 +8,8 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from datetime import datetime
 from fpdf import FPDF
 from textblob import TextBlob
+import ollama
+
 
 import matplotlib
 matplotlib.use('Agg')
@@ -42,8 +44,20 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER, form_title TEXT, student_name TEXT, attendance INTEGER, 
         answers_json TEXT, full_text_for_ai TEXT, sentiment_score REAL, sentiment_label TEXT, timestamp TEXT
     )''')
+    
+    # Robustly check for missing columns in existing table (Migration)
+    c.execute("PRAGMA table_info(responses)")
+    columns = [col[1] for col in c.fetchall()]
+    if 'full_text_for_ai' not in columns:
+        c.execute("ALTER TABLE responses ADD COLUMN full_text_for_ai TEXT")
+    if 'sentiment_score' not in columns:
+        c.execute("ALTER TABLE responses ADD COLUMN sentiment_score REAL")
+    if 'sentiment_label' not in columns:
+        c.execute("ALTER TABLE responses ADD COLUMN sentiment_label TEXT")
+        
     conn.commit()
     conn.close()
+
 
 init_db()
 
@@ -76,19 +90,43 @@ def create_form():
 
 @app.route('/api/forms', methods=['GET'])
 def get_forms():
-    conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    if request.args.get('active_only'): c.execute("SELECT * FROM forms WHERE is_active = 1 ORDER BY id DESC")
-    else: c.execute("SELECT * FROM forms ORDER BY id DESC")
-    rows = c.fetchall(); conn.close()
-    results = [dict(row) for row in rows]
-    for r in results: r['structure'] = json.loads(r['structure'])
-    return jsonify(results)
+    try:
+        conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
+        active_only = request.args.get('active_only')
+        if active_only: 
+            c.execute("SELECT * FROM forms WHERE is_active = 1 ORDER BY id DESC")
+        else: 
+            c.execute("SELECT * FROM forms ORDER BY id DESC")
+        rows = c.fetchall(); conn.close()
+        results = []
+        for row in rows:
+            r = dict(row)
+            try:
+                r['structure'] = json.loads(r['structure']) if r['structure'] else []
+                results.append(r)
+            except Exception as e:
+                print(f"ERROR parsing form structure for ID {r.get('id')}: {e}")
+        return jsonify(results)
+    except Exception as e:
+        print(f"ERROR in get_forms: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/toggle_form', methods=['POST'])
 def toggle_form():
     if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
     conn = sqlite3.connect('instance/feedback.db'); c = conn.cursor()
     c.execute("UPDATE forms SET is_active = ? WHERE id = ?", (request.json.get('status'), request.json.get('id')))
+    conn.commit(); conn.close()
+    return jsonify({"status": "success"})
+
+@app.route('/api/update_form', methods=['POST'])
+def update_form():
+    if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
+    data = request.json
+    conn = sqlite3.connect('instance/feedback.db'); c = conn.cursor()
+    c.execute("UPDATE forms SET title = ?, course_name = ?, structure = ? WHERE id = ?",
+              (data.get('title'), data.get('course_name'), json.dumps(data.get('questions', [])), data.get('id')))
     conn.commit(); conn.close()
     return jsonify({"status": "success"})
 
@@ -126,7 +164,10 @@ def submit_feedback():
                   (data.get('form_id'), data.get('form_title'), data.get('student_name', 'Anonymous'), 100, json.dumps(answers), full_text, text_score, label, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit(); conn.close()
         return jsonify({"status": "success"})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e: 
+        print(f"ERROR in submit_feedback: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 
 # --- CORE ATTAINMENT ENGINE ---
 def sort_key(k):
@@ -137,19 +178,32 @@ def sort_key(k):
     return (4, 0)
 
 def get_attainment_data(form_id):
-    conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    c.execute("SELECT * FROM responses WHERE form_id = ?", (form_id,))
-    responses = c.fetchall()
-    c.execute("SELECT * FROM forms WHERE id = ?", (form_id,))
-    form_data = c.fetchone()
-    conn.close()
+    try:
+        conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
+        c.execute("SELECT * FROM responses WHERE form_id = ?", (form_id,))
+        responses = c.fetchall()
+        c.execute("SELECT * FROM forms WHERE id = ?", (form_id,))
+        form_data = c.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"ERROR fetching data for form_id {form_id}: {e}")
+        return {"error": str(e)}
+
 
     course_name = form_data['course_name'] if form_data else "Unknown"
     form_title = form_data['title'] if form_data else "Unknown"
-    structure = json.loads(form_data['structure']) if form_data and form_data['structure'] else []
+    
+    structure = []
+    if form_data and form_data['structure']:
+        try:
+            structure = json.loads(form_data['structure'])
+            if not isinstance(structure, list): structure = []
+        except:
+            structure = []
 
     if not responses: 
         return {"stats": [], "question_stats": [], "sentiment": {}, "total": 0, "course_name": course_name, "title": form_title, "responses": []}
+
 
     stats = {}
     for i in range(1, 7): stats[f"CO{i}"] = {"sum": 0, "max_sum": 0, "count": 0}
@@ -182,12 +236,13 @@ def get_attainment_data(form_id):
                         stats[key]["count"] += 1
             
             for qs in question_stats:
-                if qs['text'] == ans['question']:
-                    if qs['type'] in ['rating_3', 'rating_5'] and ans['answer']:
+                ans_question = ans.get('question')
+                if ans_question and qs['text'] == ans_question:
+                    if qs['type'] in ['rating_3', 'rating_5'] and ans.get('answer'):
                         qs['sum'] += score
                         qs['max_sum'] += max_q_score
                         qs['count'] += 1
-                    elif qs['type'] == 'text' and str(ans['answer']).strip():
+                    elif qs['type'] == 'text' and str(ans.get('answer', '')).strip():
                         qs['count'] += 1
 
     report = []
@@ -298,6 +353,40 @@ def export_pdf():
     res.headers['Content-Type'] = 'application/pdf'
     res.headers['Content-Disposition'] = f"attachment; filename={data['course_name'].replace(' ', '_')}_Report.pdf"
     return res
+
+@app.route('/api/ai_summary', methods=['GET'])
+def ai_summary():
+    if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
+    form_id = request.args.get('form_id')
+    if not form_id: return jsonify({"error": "Form ID required"}), 400
+    
+    conn = sqlite3.connect('instance/feedback.db')
+    c = conn.cursor()
+    c.execute("SELECT full_text_for_ai FROM responses WHERE form_id = ?", (form_id,))
+    rows = c.fetchall()
+    conn.close()
+    
+    feedbacks = [row[0] for row in rows if row[0] and row[0].strip()]
+    if not feedbacks:
+        return jsonify({"summary": "No text feedback available to summarize."})
+        
+    combined_text = "\n".join(feedbacks)
+    
+    prompt = f"""
+    You are an expert academic analyst. Summarize the following student feedback for an engineering course.
+    Highlight the specific strengths, major weaknesses, and actionable suggestions for the faculty.
+    Keep the summary professional, concise (max 150 words), and formatted as a few bullet points.
+
+    STUDENT FEEDBACK:
+    \"\"\"{combined_text}\"\"\"
+    """
+    
+    try:
+        response = ollama.chat(model='llama3.2', messages=[{'role': 'user', 'content': prompt}])
+        summary = response['message']['content'].strip()
+        return jsonify({"summary": summary})
+    except Exception as e:
+        return jsonify({"error": f"AI Error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

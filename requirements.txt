@@ -3,3 +3,6 @@ flask-cors
 textblob
 fpdf
 matplotlib
+better-profanity
+groq
+google-generativeai

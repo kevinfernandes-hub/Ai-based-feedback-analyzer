@@ -5,18 +5,21 @@ import csv
 import io
 import uuid
 import re
+import logging
+import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, make_response
 from datetime import datetime
 from fpdf import FPDF
 from textblob import TextBlob
 from better_profanity import profanity
+from werkzeug.middleware.proxy_fix import ProxyFix
 try:
     from groq import Groq
 except Exception:
     Groq = None
 
 try:
-    import google.generativeai as genai
+    from google import genai
 except Exception:
     genai = None
 
@@ -25,10 +28,94 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "obe_nba_secret")
+APP_ENV = os.getenv("FLASK_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+
+_secret_key = os.getenv("FLASK_SECRET_KEY", "").strip()
+if not _secret_key:
+    if IS_PRODUCTION:
+        raise RuntimeError("FLASK_SECRET_KEY must be set in production.")
+    _secret_key = "dev-only-change-me"
+
+app.secret_key = _secret_key
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
+
+if IS_PRODUCTION:
+    app.config.update(
+        SESSION_COOKIE_SECURE=True,
+        PREFERRED_URL_SCHEME="https",
+    )
+
+# Respect reverse-proxy headers in production deployments.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
+logging.basicConfig(level=logging.INFO)
+DB_PATH = os.path.join(app.instance_path, "feedback.db")
+STUDENT_SUBMITTER_COOKIE = "student_submitter_id"
+
+
+def get_db_connection(row_factory=False):
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_submitter_cookie(response):
+    token = (request.cookies.get(STUDENT_SUBMITTER_COOKIE) or "").strip()
+    if token:
+        return response
+
+    response.set_cookie(
+        STUDENT_SUBMITTER_COOKIE,
+        secrets.token_hex(16),
+        max_age=60 * 60 * 24 * 365,
+        httponly=True,
+        samesite="Lax",
+        secure=IS_PRODUCTION,
+    )
+    return response
+
+
+def get_submitter_key():
+    token = (request.cookies.get(STUDENT_SUBMITTER_COOKIE) or "").strip()
+    if token:
+        return f"cookie:{token}"
+
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    ip = (forwarded_for.split(",")[0].strip() if forwarded_for else request.remote_addr) or "unknown"
+    user_agent = (request.headers.get("User-Agent", "unknown") or "unknown")[:200]
+    return f"fallback:{ip}|{user_agent}"
+
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+
+BRAND_COLLEGE_NAME = os.getenv("BRAND_COLLEGE_NAME", "Department of Computer Science and Engineering")
+BRAND_LOGO_URL = os.getenv("BRAND_LOGO_URL", "/static/img/logo.png")
+BRAND_PRIMARY_COLOR = os.getenv("BRAND_PRIMARY_COLOR", "#0f172a")
+BRAND_ACCENT_COLOR = os.getenv("BRAND_ACCENT_COLOR", "#0c4a6e")
+
+
+def get_branding_context():
+    return {
+        "college_name": BRAND_COLLEGE_NAME,
+        "logo_url": BRAND_LOGO_URL,
+        "primary_color": BRAND_PRIMARY_COLOR,
+        "accent_color": BRAND_ACCENT_COLOR,
+    }
 
 # --- AI CONFIGURATION ---
 profanity.load_censor_words()
@@ -41,6 +128,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-8b-8192")
 
 GEMINI_FALLBACK_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
     "gemini-1.5-flash-latest",
     "gemini-1.5-flash",
     "gemini-1.5-pro-latest",
@@ -49,21 +138,20 @@ GEMINI_FALLBACK_MODELS = [
 
 ai_provider = None
 gemini_model = None
+gemini_client = None
 groq_client = None
 gemini_model_candidates = []
 
 def load_gemini_candidates():
-    if not genai:
+    if not genai or not gemini_client:
         return []
 
     discovered = []
     try:
-        for m in genai.list_models():
-            methods = getattr(m, 'supported_generation_methods', []) or []
-            if 'generateContent' in methods:
-                model_name = getattr(m, 'name', '').replace('models/', '')
-                if model_name:
-                    discovered.append(model_name)
+        for m in gemini_client.models.list():
+            model_name = getattr(m, 'name', '').replace('models/', '')
+            if model_name and model_name.startswith('gemini'):
+                discovered.append(model_name)
     except Exception:
         discovered = []
 
@@ -76,10 +164,10 @@ def load_gemini_candidates():
 
 try:
     if GEMINI_API_KEY and genai:
-        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
         gemini_model_candidates = load_gemini_candidates()
         initial_model = gemini_model_candidates[0] if gemini_model_candidates else GEMINI_MODEL
-        gemini_model = genai.GenerativeModel(initial_model)
+        gemini_model = initial_model
         ai_provider = "gemini"
         print(f"✅ AI Online: Connected to Gemini ({initial_model})")
     elif GROQ_API_KEY and Groq:
@@ -92,28 +180,24 @@ except Exception as e:
     ai_provider = None
 
 def ai_generate_text(system_prompt, user_prompt):
-    if ai_provider == "gemini" and gemini_model:
+    if ai_provider == "gemini" and gemini_client:
         prompt = f"{system_prompt}\n\nUser Input:\n{user_prompt}"
-        try:
-            response = gemini_model.generate_content(prompt)
-            return (getattr(response, 'text', '') or '').strip()
-        except Exception as e:
-            # Retry with discovered and fallback model IDs if the current one is unavailable.
-            if "not found" in str(e).lower() or "404" in str(e):
-                attempted = set()
-                candidate_models = gemini_model_candidates or ([GEMINI_MODEL] + GEMINI_FALLBACK_MODELS)
-                for model_name in candidate_models:
-                    if model_name in attempted:
-                        continue
-                    attempted.add(model_name)
-                    try:
-                        fallback_model = genai.GenerativeModel(model_name)
-                        response = fallback_model.generate_content(prompt)
-                        globals()['gemini_model'] = fallback_model
-                        return (getattr(response, 'text', '') or '').strip()
-                    except Exception:
-                        continue
-            raise
+        attempted = set()
+        candidate_models = [gemini_model] + (gemini_model_candidates or ([GEMINI_MODEL] + GEMINI_FALLBACK_MODELS))
+        last_error = None
+        for model_name in candidate_models:
+            if not model_name or model_name in attempted:
+                continue
+            attempted.add(model_name)
+            try:
+                response = gemini_client.models.generate_content(model=model_name, contents=prompt)
+                globals()['gemini_model'] = model_name
+                return (getattr(response, 'text', '') or '').strip()
+            except Exception as e:
+                last_error = e
+                continue
+        if last_error:
+            raise last_error
 
     if ai_provider == "groq" and groq_client:
         completion = groq_client.chat.completions.create(
@@ -200,11 +284,11 @@ COURSE_DATA_DB = {
 }
 
 def init_db():
-    if not os.path.exists('instance'): os.makedirs('instance')
-    conn = sqlite3.connect('instance/feedback.db')
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS forms (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, course_name TEXT, structure TEXT, is_active BOOLEAN DEFAULT 1, created_at TEXT, start_at TEXT, end_at TEXT
+        id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, course_name TEXT, structure TEXT, is_active BOOLEAN DEFAULT 1, created_at TEXT, start_at TEXT, end_at TEXT, public_token TEXT
     )''')
     try:
         c.execute("ALTER TABLE forms ADD COLUMN start_at TEXT")
@@ -214,9 +298,34 @@ def init_db():
         c.execute("ALTER TABLE forms ADD COLUMN end_at TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        c.execute("ALTER TABLE forms ADD COLUMN public_token TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    c.execute("SELECT id, public_token FROM forms")
+    rows = c.fetchall()
+    seen_tokens = set()
+    for form_id, token in rows:
+        if token:
+            seen_tokens.add(token)
+            continue
+        new_token = uuid.uuid4().hex[:12]
+        while new_token in seen_tokens:
+            new_token = uuid.uuid4().hex[:12]
+        seen_tokens.add(new_token)
+        c.execute("UPDATE forms SET public_token = ? WHERE id = ?", (new_token, form_id))
+
     c.execute('''CREATE TABLE IF NOT EXISTS responses (
         id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER, form_title TEXT, student_name TEXT, attendance INTEGER, 
         answers_json TEXT, full_text_for_ai TEXT, sentiment_score REAL, sentiment_label TEXT, timestamp TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS submission_locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        form_id INTEGER NOT NULL,
+        submitter_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(form_id, submitter_key)
     )''')
     conn.commit()
     conn.close()
@@ -225,8 +334,16 @@ init_db()
 
 @app.route('/')
 def landing(): return render_template('landing.html')
+@app.route('/healthz')
+def healthz(): return jsonify({"status": "ok"})
 @app.route('/student')
-def student(): return render_template('student.html')
+def student():
+    response = make_response(render_template('student.html', brand=get_branding_context()))
+    return ensure_submitter_cookie(response)
+@app.route('/f/<token>')
+def published_form(token):
+    response = make_response(render_template('student.html', published_token=token, brand=get_branding_context()))
+    return ensure_submitter_cookie(response)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -249,15 +366,17 @@ def create_form():
         if 'required' not in q:
             q['required'] = True
 
-    conn = sqlite3.connect('instance/feedback.db'); c = conn.cursor()
-    c.execute("INSERT INTO forms (title, course_name, structure, created_at, start_at, end_at) VALUES (?, ?, ?, ?, ?, ?)", 
+    form_token = uuid.uuid4().hex[:12]
+    conn = get_db_connection(); c = conn.cursor()
+    c.execute("INSERT INTO forms (title, course_name, structure, created_at, start_at, end_at, public_token) VALUES (?, ?, ?, ?, ?, ?, ?)", 
               (
                   data.get('title'),
                   data.get('course_name'),
                   json.dumps(questions),
                   datetime.now().strftime("%Y-%m-%d"),
                   data.get('start_at') or None,
-                  data.get('end_at') or None
+                  data.get('end_at') or None,
+                  form_token
               ))
     conn.commit(); conn.close()
     return jsonify({"status": "success"})
@@ -271,7 +390,7 @@ def edit_form():
         if 'required' not in q:
             q['required'] = True
 
-    conn = sqlite3.connect('instance/feedback.db'); c = conn.cursor()
+    conn = get_db_connection(); c = conn.cursor()
     c.execute("UPDATE forms SET title=?, course_name=?, structure=?, start_at=?, end_at=? WHERE id=?", 
               (
                   data.get('title'),
@@ -308,7 +427,7 @@ def is_form_open(row):
 @app.route('/api/forms', methods=['GET'])
 def get_forms():
     try:
-        conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
+        conn = get_db_connection(row_factory=True); c = conn.cursor()
         c.execute("SELECT * FROM forms ORDER BY id DESC")
         rows = c.fetchall(); conn.close()
         results = []
@@ -317,6 +436,7 @@ def get_forms():
             try: r['structure'] = json.loads(r['structure']) if r['structure'] else []
             except: r['structure'] = []
             r['is_open'] = is_form_open(r)
+            r['public_url'] = url_for('published_form', token=r.get('public_token') or '', _external=True)
 
             if request.args.get('active_only') and not r['is_open']:
                 continue
@@ -324,10 +444,31 @@ def get_forms():
         return jsonify(results)
     except: return jsonify([]), 500
 
+@app.route('/api/forms/published/<token>', methods=['GET'])
+def get_published_form(token):
+    conn = get_db_connection(row_factory=True); c = conn.cursor()
+    c.execute("SELECT * FROM forms WHERE public_token = ?", (token,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "Form not found."}), 404
+
+    form_data = dict(row)
+    if not is_form_open(form_data):
+        return jsonify({"error": "This form is currently closed."}), 400
+
+    try:
+        form_data['structure'] = json.loads(form_data.get('structure') or "[]")
+    except Exception:
+        form_data['structure'] = []
+    form_data['is_open'] = True
+    form_data['public_url'] = url_for('published_form', token=form_data.get('public_token') or '', _external=True)
+    return jsonify(form_data)
+
 @app.route('/api/toggle_form', methods=['POST'])
 def toggle_form():
     if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
-    conn = sqlite3.connect('instance/feedback.db'); c = conn.cursor()
+    conn = get_db_connection(); c = conn.cursor()
     c.execute("UPDATE forms SET is_active = ? WHERE id = ?", (request.json.get('status'), request.json.get('id')))
     conn.commit(); conn.close()
     return jsonify({"status": "success"})
@@ -337,8 +478,9 @@ def submit_feedback():
     try:
         data = request.json
         answers = data.get('answers', [])
+        submitter_key = get_submitter_key()
 
-        conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
+        conn = get_db_connection(row_factory=True); c = conn.cursor()
         c.execute("SELECT * FROM forms WHERE id = ?", (data.get('form_id'),))
         form_row = c.fetchone()
         if not form_row:
@@ -385,12 +527,27 @@ def submit_feedback():
             elif text_score < -0.15: label = "Negative"
 
         c = conn.cursor()
+        try:
+            c.execute(
+                "INSERT INTO submission_locks (form_id, submitter_key, created_at) VALUES (?, ?, ?)",
+                (data.get('form_id'), submitter_key, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+        except sqlite3.IntegrityError:
+            conn.close()
+            return jsonify({"status": "error", "message": "Duplicate submission blocked: this form was already submitted from this device/browser."}), 409
+
         c.execute('''INSERT INTO responses (form_id, form_title, student_name, attendance, answers_json, full_text_for_ai, sentiment_score, sentiment_label, timestamp) 
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
                   (data.get('form_id'), data.get('form_title'), data.get('student_name', 'Anonymous'), 100, json.dumps(answers), full_text, text_score, label, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit(); conn.close()
         return jsonify({"status": "success"})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+        return jsonify({"error": str(e)}), 500
 
 # --- AI ENDPOINTS ---
 def normalize_question(text):
@@ -471,7 +628,7 @@ def ai_suggest_questions():
 def ai_report():
     if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
     if not ai_provider: return jsonify({"report": "<p>AI Offline. Set GEMINI_API_KEY or GROQ_API_KEY.</p>"})
-    conn = sqlite3.connect('instance/feedback.db'); c = conn.cursor()
+    conn = get_db_connection(); c = conn.cursor()
     c.execute("SELECT full_text_for_ai FROM responses WHERE form_id = ?", (request.json.get('form_id'),))
     rows = c.fetchall(); conn.close()
     
@@ -496,7 +653,7 @@ def sort_key(k):
     return (4, 0)
 
 def get_attainment_data(form_id):
-    conn = sqlite3.connect('instance/feedback.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
+    conn = get_db_connection(row_factory=True); c = conn.cursor()
     c.execute("SELECT * FROM responses WHERE form_id = ?", (form_id,))
     responses = c.fetchall()
     c.execute("SELECT * FROM forms WHERE id = ?", (form_id,))
@@ -737,5 +894,10 @@ def export_csv():
     return output
 
 if __name__ == '__main__':
+    app.logger.info("Starting app in %s mode", APP_ENV)
     run_port = int(os.getenv("PORT", "5050"))
-    app.run(debug=True, host='127.0.0.1', port=run_port)
+    run_host = os.getenv("HOST", "127.0.0.1")
+    if IS_PRODUCTION and run_host == "127.0.0.1":
+        run_host = "0.0.0.0"
+    debug_mode = os.getenv("FLASK_DEBUG", "0") == "1" and not IS_PRODUCTION
+    app.run(debug=debug_mode, host=run_host, port=run_port)

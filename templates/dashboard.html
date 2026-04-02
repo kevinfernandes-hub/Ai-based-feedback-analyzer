@@ -45,6 +45,8 @@
                 <div><h3 class="text-2xl font-bold text-slate-800" id="selectedFormTitle">Course Name</h3><p class="text-xs text-slate-500" id="selectedEventTitle">Event Title</p></div>
                 <div class="flex gap-3 items-center">
                     <button onclick="openEditModal()" class="px-4 py-2 bg-slate-100 text-slate-700 border border-slate-200 text-sm font-bold rounded-lg hover:bg-slate-200 transition shadow-sm flex items-center gap-2"><i class="ph-bold ph-pencil-simple"></i> Edit Form</button>
+                    <button id="copyFormLinkBtn" onclick="copyFormLink(event, currentFormId)" class="px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 text-sm font-bold rounded-lg hover:bg-emerald-100 transition shadow-sm flex items-center gap-2"><i class="ph-bold ph-link"></i> Copy Link</button>
+                    <button id="qrFormLinkBtn" onclick="showFormQr(event, currentFormId)" class="px-4 py-2 bg-cyan-50 text-cyan-700 border border-cyan-200 text-sm font-bold rounded-lg hover:bg-cyan-100 transition shadow-sm flex items-center gap-2"><i class="ph-bold ph-qr-code"></i> QR</button>
                     
                     <div class="w-px h-6 bg-slate-200 mx-1"></div>
                     <button onclick="generateAIReport()" class="px-4 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition flex items-center gap-2 shadow-sm"><i class="ph-fill ph-sparkle"></i> AI Insights</button>
@@ -113,6 +115,23 @@
             <button onclick="document.getElementById('aiModal').classList.add('hidden')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
             <h2 class="text-2xl font-bold mb-2 text-slate-800 flex items-center gap-2"><i class="ph-fill ph-sparkle text-purple-600"></i> AI Insights</h2>
             <div id="aiReportContent" class="text-slate-700 space-y-4 leading-relaxed mt-6 prose prose-purple"></div>
+        </div>
+    </div>
+
+    <!-- Form QR Modal -->
+    <div id="shareQrModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div class="bg-white border border-slate-200 rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+            <button onclick="closeQrModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
+            <h3 class="text-xl font-bold text-slate-800 flex items-center gap-2"><i class="ph-bold ph-share-network text-cyan-600"></i> Share Form</h3>
+            <p class="text-xs text-slate-500 mt-1">Scan QR or copy the direct public link.</p>
+            <div class="mt-5 flex justify-center">
+                <img id="qrPreviewImage" alt="Form QR" class="w-56 h-56 rounded-xl border border-slate-200 p-2 bg-white shadow-sm" />
+            </div>
+            <a id="qrPublicLink" href="#" target="_blank" rel="noopener" class="mt-4 block text-xs text-cyan-700 break-all hover:underline"></a>
+            <div class="mt-4 flex gap-2">
+                <button onclick="copyQrLink()" class="flex-1 py-2.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-sm font-bold hover:bg-emerald-100">Copy Link</button>
+                <a id="openQrPublicLink" href="#" target="_blank" rel="noopener" class="flex-1 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-bold text-center hover:bg-slate-700">Open Form</a>
+            </div>
         </div>
     </div>
 
@@ -436,19 +455,86 @@
                     const activeClass = currentFormId === f.id ? 'border-blue-500 bg-blue-50 shadow-sm ring-1 ring-blue-500' : 'border-slate-100 bg-white hover:border-blue-200';
                     const statusClass = f.is_open ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500';
                     const statusText = f.is_open ? 'Open' : 'Closed';
-                    list.innerHTML += `<div class="p-4 rounded-xl border ${activeClass} cursor-pointer transition mb-2" onclick="selectForm(${f.id}, '${f.title}', '${f.course_name}')"><div class="flex justify-between items-start"><div><span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">${f.course_name}</span><span class="font-bold text-sm text-slate-800">${f.title}</span><span class="block text-[10px] text-slate-400 mt-1">${f.start_at || '-'} to ${f.end_at || '-'}</span></div><span class="text-[10px] px-2 py-0.5 rounded-full ${statusClass}">${statusText}</span></div></div>`;
+                    list.innerHTML += `<div class="p-4 rounded-xl border ${activeClass} cursor-pointer transition mb-2" onclick="selectForm(${f.id})"><div class="flex justify-between items-start gap-3"><div><span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">${f.course_name}</span><span class="font-bold text-sm text-slate-800">${f.title}</span><span class="block text-[10px] text-slate-400 mt-1">${f.start_at || '-'} to ${f.end_at || '-'}</span></div><div class="flex flex-col items-end gap-2"><div class="flex gap-1"><span class="text-[10px] px-2 py-0.5 rounded-full ${statusClass}">${statusText}</span><span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">Published</span></div><div class="flex gap-1"><button class="text-[10px] font-bold px-2 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100" onclick="copyFormLink(event, ${f.id})">Copy</button><button class="text-[10px] font-bold px-2 py-1 rounded bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100" onclick="showFormQr(event, ${f.id})">QR</button></div></div></div></div>`;
                 });
             } catch(e) {}
         }
 
-        window.selectForm = function(id, title, course) {
+        window.selectForm = function(id) {
+            const selected = allAdminForms.find((f) => f.id === id);
+            if (!selected) {
+                return;
+            }
             currentFormId = id; 
-            document.getElementById('selectedFormTitle').innerText = course;
-            document.getElementById('selectedEventTitle').innerText = title;
+            document.getElementById('selectedFormTitle').innerText = selected.course_name;
+            document.getElementById('selectedEventTitle').innerText = selected.title;
             document.getElementById('analyticsHeader').classList.remove('hidden');
             document.getElementById('downloadPdfBtn').href = `/api/export_pdf?form_id=${id}`;
             document.getElementById('downloadCsvBtn').href = `/api/export_csv?form_id=${id}`;
+            const copyBtn = document.getElementById('copyFormLinkBtn');
+            if (copyBtn) {
+                copyBtn.disabled = false;
+            }
+            const qrBtn = document.getElementById('qrFormLinkBtn');
+            if (qrBtn) {
+                qrBtn.disabled = false;
+            }
             loadForms(); loadAttainment(id);
+        }
+
+        window.copyFormLink = async function(event, formId) {
+            if (event) {
+                event.stopPropagation();
+            }
+            const selected = allAdminForms.find((f) => f.id === formId);
+            if (!selected || !selected.public_url) {
+                alert('Form link is not available.');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(selected.public_url);
+                alert('Form link copied. Share it with students.');
+            } catch (e) {
+                prompt('Copy this form link:', selected.public_url);
+            }
+        }
+
+        function buildQrUrl(link) {
+            return `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(link)}`;
+        }
+
+        window.closeQrModal = function() {
+            document.getElementById('shareQrModal').classList.add('hidden');
+        }
+
+        window.showFormQr = function(event, formId) {
+            if (event) {
+                event.stopPropagation();
+            }
+            const selected = allAdminForms.find((f) => f.id === formId);
+            if (!selected || !selected.public_url) {
+                alert('Form link is not available.');
+                return;
+            }
+            const link = selected.public_url;
+            document.getElementById('qrPreviewImage').src = buildQrUrl(link);
+            document.getElementById('qrPublicLink').href = link;
+            document.getElementById('qrPublicLink').innerText = link;
+            document.getElementById('openQrPublicLink').href = link;
+            document.getElementById('shareQrModal').classList.remove('hidden');
+        }
+
+        window.copyQrLink = async function() {
+            const link = document.getElementById('qrPublicLink').innerText;
+            if (!link) {
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(link);
+                alert('Form link copied.');
+            } catch (e) {
+                prompt('Copy this form link:', link);
+            }
         }
 
         window.generateAIReport = async function() {

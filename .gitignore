@@ -1,5 +1,7 @@
 .venv/
 pycache/
+__pycache__/
 instance/
 *.db
 .vscode/
+.env

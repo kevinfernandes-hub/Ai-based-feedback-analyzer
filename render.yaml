@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: ai-based-feedback-analyzer
+    runtime: python
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /healthz
+    buildCommand: pip install -r requirements.txt && python -c "from app import init_db; init_db()"
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT --timeout 120 wsgi:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama3-8b-8192
+      - key: BRAND_COLLEGE_NAME
+        sync: false
+      - key: BRAND_LOGO_URL
+        value: /static/img/logo.png
+      - key: BRAND_PRIMARY_COLOR
+        value: "#0f172a"
+      - key: BRAND_ACCENT_COLOR
+        value: "#0c4a6e"
+    disk:
+      name: feedback-data
+      mountPath: /opt/render/project/src/instance
+      sizeGB: 1

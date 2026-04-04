@@ -75,6 +75,23 @@
                 </div>
             </div>
 
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 class="font-bold text-sm text-slate-800 mb-4 flex items-center gap-2"><i class="ph-fill ph-warning text-orange-600"></i> Low-Performing Outcomes</h3>
+                    <div id="lowOutcomesContainer" class="space-y-2 text-sm">
+                        <p class="text-slate-400">Select a form to analyze outcomes.</p>
+                    </div>
+                    <button onclick="refreshLowOutcomes()" class="mt-4 w-full py-2 bg-orange-50 text-orange-700 rounded-lg text-xs font-bold hover:bg-orange-100 transition">Refresh Analysis</button>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 class="font-bold text-sm text-slate-800 mb-4 flex items-center gap-2"><i class="ph-fill ph-chat-dots text-violet-600"></i> Suggested Follow-ups</h3>
+                    <div id="followupSummary" class="space-y-2 text-sm text-slate-600 mb-4">
+                        <p class="text-slate-400">No follow-up suggestions yet.</p>
+                    </div>
+                    <button onclick="generateFollowupQuestions()" class="w-full py-2 bg-violet-50 text-violet-700 rounded-lg text-xs font-bold hover:bg-violet-100 transition">Generate Suggestions</button>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><h3 class="font-bold text-sm text-slate-800 mb-4">Outcome Attainment Levels</h3><div class="h-48 relative"><canvas id="pieChart"></canvas></div></div>
                 <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><h3 class="font-bold text-sm text-slate-800 mb-4">Question Attainment Analysis</h3><div class="h-48 relative"><canvas id="barChart"></canvas></div></div>
@@ -135,6 +152,20 @@
         </div>
     </div>
 
+    <!-- Follow-up Questions Modal -->
+    <div id="followupModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div class="bg-white border border-slate-200 rounded-2xl p-8 max-w-3xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto custom-scrollbar">
+            <button onclick="document.getElementById('followupModal').classList.add('hidden')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
+            <h2 class="text-2xl font-bold mb-2 text-slate-800 flex items-center gap-2"><i class="ph-fill ph-chat-dots text-violet-600"></i> Suggested Follow-up Questions</h2>
+            <p class="text-xs text-slate-500 mb-6">Based on feedback trends. Add these to your form or generate new ones.</p>
+            <div id="followupQuestionsContent" class="space-y-4"></div>
+            <div class="mt-6 flex gap-3">
+                <button onclick="addFollowupToForm()" class="flex-1 py-2.5 bg-violet-600 text-white rounded-lg text-sm font-bold hover:bg-violet-700">Add Selected to Form</button>
+                <button onclick="document.getElementById('followupModal').classList.add('hidden')" class="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-200">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- FORM BUILDER MODAL -->
     <div id="builderModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl w-full max-w-5xl shadow-2xl relative flex flex-col max-h-[90vh]">
@@ -179,6 +210,14 @@
                         <input type="datetime-local" id="endAtInput" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500">
                     </div>
                 </div>
+
+                <div class="grid grid-cols-[1fr_auto] gap-3 mb-6 items-end">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">AI Topic / Theme</label>
+                        <input type="text" id="topicInput" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500" placeholder="e.g., CPU scheduling, deadlocks, database normalization">
+                    </div>
+                    <button type="button" onclick="generateQuestionsAI()" class="h-[46px] px-4 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition shadow-lg flex items-center gap-2"><i class="ph-fill ph-sparkle"></i> Generate by Topic</button>
+                </div>
                 
                 <div class="flex justify-between items-center mb-3 border-b border-slate-100 pb-3">
                     <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Questions & Mapping</span>
@@ -222,6 +261,14 @@
         let pieChartInstance = null;
         let barChartInstance = null;
         let lineChartInstance = null;
+        let authRedirectInProgress = false;
+
+        function handleUnauthorized(message) {
+            if (authRedirectInProgress) return;
+            authRedirectInProgress = true;
+            alert(message || 'Session expired. Please login again.');
+            window.location.href = '/login';
+        }
 
         // SYNCED WITH UPLOADED IMAGE COURSE NAMES
         const COURSE_DATA = {
@@ -252,6 +299,7 @@
             document.getElementById('courseNameInput').value = "";
             document.getElementById('startAtInput').value = "";
             document.getElementById('endAtInput').value = "";
+            document.getElementById('topicInput').value = "";
             
             questions = [{ text: "", type: "rating_5", mappings: [] }];
             openDropdowns.clear();
@@ -259,12 +307,14 @@
             renderBuilder();
         }
 
-        window.openEditModal = function() {
-            if(!currentFormId) return alert("Please select a form to edit first.");
-            const formToEdit = allAdminForms.find(f => f.id === currentFormId);
+        window.openEditModal = function(formId = null) {
+            const targetFormId = formId || currentFormId;
+            if(!targetFormId) return alert("Please select a form to edit first.");
+            const formToEdit = allAdminForms.find(f => f.id === targetFormId);
             if(!formToEdit) return;
 
-            editingFormId = currentFormId;
+            currentFormId = targetFormId;
+            editingFormId = targetFormId;
             document.getElementById('modalMainTitle').innerHTML = 'Edit Existing Form <span class="bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded ml-2">Live Form</span>';
             document.getElementById('modalSaveBtn').innerHTML = 'Update Form <i class="ph-bold ph-check-circle"></i>';
             
@@ -272,6 +322,7 @@
             document.getElementById('courseNameInput').value = formToEdit.course_name;
             document.getElementById('startAtInput').value = formToEdit.start_at || "";
             document.getElementById('endAtInput').value = formToEdit.end_at || "";
+            document.getElementById('topicInput').value = "";
             
             questions = JSON.parse(JSON.stringify(formToEdit.structure));
             if(questions.length === 0) questions = [{ text: "", type: "rating_5", mappings: [] }];
@@ -293,6 +344,146 @@
                 questions.push({ text: text, type: "rating_5", mappings: [] });
                 selectElement.selectedIndex = 0; 
                 renderBuilder();
+            }
+        }
+
+        function normalizeGeneratedQuestion(item) {
+            if (typeof item === 'string') {
+                return { text: item, type: 'rating_5', required: true, mappings: [], ai_generated: false, confidence: 0.0, mapping_source: 'fallback' };
+            }
+            let confidence = Number(item.confidence ?? item.mapping_confidence ?? 0);
+            if (!Number.isFinite(confidence)) confidence = 0;
+            confidence = Math.max(0, Math.min(1, confidence));
+            return {
+                text: item.text || '',
+                type: item.type || 'rating_5',
+                required: item.required !== false,
+                mappings: Array.isArray(item.mappings) ? item.mappings : [],
+                ai_generated: item.ai_generated !== false,
+                confidence,
+                mapping_source: item.mapping_source || item.source || 'ai'
+            };
+        }
+
+        window.generateQuestionsAI = async function() {
+            const courseName = document.getElementById('courseNameInput').value;
+            const eventTitle = document.getElementById('formTitleInput').value;
+            const topic = document.getElementById('topicInput').value.trim() || eventTitle.trim() || courseName.trim();
+
+            if (!courseName || !eventTitle) {
+                return alert('Select a course and enter an event title first.');
+            }
+            if (!topic) {
+                return alert('Enter a topic or theme for AI generation.');
+            }
+
+            const btn = document.querySelector('button[onclick="generateQuestionsAI()"]');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin"></i> Generating...';
+
+            try {
+                const res = await fetch('/api/ai/suggest_questions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ course_name: courseName, event_title: eventTitle, topic })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    return alert(data.error || 'AI generation failed.');
+                }
+
+                const generated = (data.questions || []).map(normalizeGeneratedQuestion).filter(q => q.text);
+                if (generated.length === 0) {
+                    return alert('AI did not return usable questions. Try a different topic.');
+                }
+
+                questions = generated;
+                openDropdowns.clear();
+                renderBuilder();
+                document.getElementById('questionsContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) {
+                alert('Failed to generate questions from AI.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        }
+
+        window.regenerateQuestionAI = async function(qIdx) {
+            const courseName = document.getElementById('courseNameInput').value;
+            const eventTitle = document.getElementById('formTitleInput').value;
+            const topic = document.getElementById('topicInput').value.trim() || eventTitle.trim() || courseName.trim();
+            const current = questions[qIdx];
+            if (!current) return;
+            if (!courseName || !eventTitle) return alert('Select a course and enter an event title first.');
+
+            const btn = document.getElementById(`regenBtn_${qIdx}`);
+            const original = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin"></i>';
+            }
+
+            try {
+                const res = await fetch('/api/ai/regenerate_question', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ course_name: courseName, event_title: eventTitle, topic, seed_text: current.text, type: current.type, index: qIdx })
+                });
+                const data = await res.json();
+                if (!res.ok) return alert(data.error || 'Regeneration failed.');
+                const question = normalizeGeneratedQuestion(data.question || {});
+                if (!question.text) return alert('AI returned an empty question.');
+                questions[qIdx] = { ...question, mappings: question.mappings || [] };
+                openDropdowns.clear();
+                renderBuilder();
+            } catch (e) {
+                alert('Failed to regenerate question.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = original || 'Regenerate';
+                }
+            }
+        }
+
+        window.suggestMappingsAI = async function(qIdx) {
+            const courseName = document.getElementById('courseNameInput').value;
+            const eventTitle = document.getElementById('formTitleInput').value;
+            const topic = document.getElementById('topicInput').value.trim() || eventTitle.trim() || courseName.trim();
+            const current = questions[qIdx];
+            if (!current) return;
+            if (!courseName || !eventTitle) return alert('Select a course and enter an event title first.');
+
+            const btn = document.getElementById(`mapBtn_${qIdx}`);
+            const original = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin"></i>';
+            }
+
+            try {
+                const res = await fetch('/api/ai/suggest_mappings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ course_name: courseName, event_title: eventTitle, topic, question_text: current.text, type: current.type })
+                });
+                const data = await res.json();
+                if (!res.ok) return alert(data.error || 'Mapping suggestion failed.');
+                current.mappings = Array.isArray(data.mappings) ? data.mappings : [];
+                current.mapping_source = data.source || 'ai';
+                current.confidence = Number.isFinite(Number(data.confidence)) ? Math.max(0, Math.min(1, Number(data.confidence))) : 0;
+                current.ai_generated = true;
+                openDropdowns.clear();
+                renderBuilder();
+            } catch (e) {
+                alert('Failed to suggest mappings.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = original || 'AI Map';
+                }
             }
         }
 
@@ -370,6 +561,8 @@
 
             questions.forEach((q, i) => {
                 const mappings = q.mappings || [];
+                const confidence = Number.isFinite(Number(q.confidence)) ? Math.round(Math.max(0, Math.min(1, Number(q.confidence))) * 100) : null;
+                const aiBadge = q.ai_generated ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">AI${confidence !== null ? ` ${confidence}%` : ''}</span>` : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">Manual</span>`;
                 const activePills = mappings.map(m => `
                     <span class="px-2 py-0.5 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[11px] font-bold shadow-sm flex items-center gap-1 group-pill">
                         ${m} <button type="button" onclick="toggleMap(${i}, '${m}')" class="text-blue-400 hover:text-red-500 hover:bg-red-50 rounded-full w-4 h-4 flex items-center justify-center transition-colors">&times;</button>
@@ -378,9 +571,16 @@
 
                 c.innerHTML += `
                     <div class="flex flex-col gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
-                        <button onclick="removeQ(${i})" class="absolute top-2 right-2 text-slate-300 hover:text-red-500 font-bold w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-50 transition">&times;</button>
-                        
-                        <div class="flex gap-3 pr-6">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex flex-wrap items-center gap-2">${aiBadge}<span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Question ${i + 1}</span></div>
+                            <div class="flex items-center gap-2">
+                                <button type="button" id="mapBtn_${i}" onclick="suggestMappingsAI(${i})" class="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100 transition">AI Map</button>
+                                <button type="button" id="regenBtn_${i}" onclick="regenerateQuestionAI(${i})" class="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-violet-50 border border-violet-200 text-violet-700 hover:bg-violet-100 transition">Regenerate</button>
+                                <button onclick="removeQ(${i})" class="text-slate-300 hover:text-red-500 font-bold w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-50 transition">&times;</button>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-3">
                             <input class="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition focus:bg-white" placeholder="Enter Question to be asked..." value="${q.text}" onchange="updateQ(${i}, 'text', this.value)">
                             <select class="w-40 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 outline-none focus:border-blue-500 transition focus:bg-white" onchange="updateQ(${i}, 'type', this.value)">
                                 <option value="rating_3" ${q.type==='rating_3'?'selected':''}>Rating (1 to 3)</option>
@@ -426,16 +626,34 @@
             
             const endpoint = editingFormId ? '/api/edit_form' : '/api/create_form';
             const payload = { title, course_name: course, questions, start_at: startAt || null, end_at: endAt || null };
+            const targetFormId = editingFormId;
             if (editingFormId) payload.form_id = editingFormId;
-            
-            await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+
+            try {
+                const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const data = await res.json().catch(() => ({}));
+                if (res.status === 401) {
+                    handleUnauthorized('Session expired. Please login again.');
+                    return;
+                }
+                if (!res.ok) {
+                    return alert(data.error || 'Failed to save form.');
+                }
+            } catch (e) {
+                return alert('Network error while saving form.');
+            }
             
             document.getElementById('builderModal').classList.add('hidden'); 
             editingFormId = null;
             openDropdowns.clear(); 
-            
-            loadForms();
-            if(currentFormId) loadAttainment(currentFormId);
+
+            await loadForms();
+            if (targetFormId) {
+                selectForm(targetFormId);
+                alert('Form updated successfully.');
+            } else {
+                alert('Form created successfully.');
+            }
         }
 
         async function loadForms() {
@@ -455,7 +673,7 @@
                     const activeClass = currentFormId === f.id ? 'border-blue-500 bg-blue-50 shadow-sm ring-1 ring-blue-500' : 'border-slate-100 bg-white hover:border-blue-200';
                     const statusClass = f.is_open ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500';
                     const statusText = f.is_open ? 'Open' : 'Closed';
-                    list.innerHTML += `<div class="p-4 rounded-xl border ${activeClass} cursor-pointer transition mb-2" onclick="selectForm(${f.id})"><div class="flex justify-between items-start gap-3"><div><span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">${f.course_name}</span><span class="font-bold text-sm text-slate-800">${f.title}</span><span class="block text-[10px] text-slate-400 mt-1">${f.start_at || '-'} to ${f.end_at || '-'}</span></div><div class="flex flex-col items-end gap-2"><div class="flex gap-1"><span class="text-[10px] px-2 py-0.5 rounded-full ${statusClass}">${statusText}</span><span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">Published</span></div><div class="flex gap-1"><button class="text-[10px] font-bold px-2 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100" onclick="copyFormLink(event, ${f.id})">Copy</button><button class="text-[10px] font-bold px-2 py-1 rounded bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100" onclick="showFormQr(event, ${f.id})">QR</button></div></div></div></div>`;
+                    list.innerHTML += `<div class="p-4 rounded-xl border ${activeClass} cursor-pointer transition mb-2" onclick="selectForm(${f.id})"><div class="flex justify-between items-start gap-3"><div><span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">${f.course_name}</span><span class="font-bold text-sm text-slate-800">${f.title}</span><span class="block text-[10px] text-slate-400 mt-1">${f.start_at || '-'} to ${f.end_at || '-'}</span></div><div class="flex flex-col items-end gap-2"><div class="flex gap-1"><span class="text-[10px] px-2 py-0.5 rounded-full ${statusClass}">${statusText}</span><span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">Published</span></div><div class="flex gap-1"><button class="text-[10px] font-bold px-2 py-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100" onclick="event.stopPropagation(); openEditModal(${f.id});">Edit</button><button class="text-[10px] font-bold px-2 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100" onclick="copyFormLink(event, ${f.id})">Copy</button><button class="text-[10px] font-bold px-2 py-1 rounded bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100" onclick="showFormQr(event, ${f.id})">QR</button></div></div></div></div>`;
                 });
             } catch(e) {}
         }
@@ -479,7 +697,7 @@
             if (qrBtn) {
                 qrBtn.disabled = false;
             }
-            loadForms(); loadAttainment(id);
+            loadForms(); loadAttainment(id); refreshLowOutcomes();
         }
 
         window.copyFormLink = async function(event, formId) {
@@ -549,14 +767,124 @@
             try {
                 const res = await fetch('/api/ai/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form_id: currentFormId }) });
                 const data = await res.json();
+                if (res.status === 401) {
+                    document.getElementById('aiReportContent').innerHTML = '<p class="text-amber-600">Session expired. Redirecting to login...</p>';
+                    handleUnauthorized('Session expired. Please login again to use AI Insights.');
+                    return;
+                }
                 document.getElementById('aiReportContent').innerHTML = data.report || `<p class="text-red-500">${data.error}</p>`;
             } catch(e) { document.getElementById('aiReportContent').innerHTML = '<p class="text-red-500">Failed to generate report.</p>'; }
+        }
+
+        async function refreshLowOutcomes() {
+            if (!currentFormId) return;
+            try {
+                const res = await fetch(`/api/outcome_risk?form_id=${currentFormId}`);
+                if (res.status === 401) {
+                    handleUnauthorized('Session expired.');
+                    return;
+                }
+                const data = await res.json();
+                const container = document.getElementById('lowOutcomesContainer');
+                
+                if (!data.outcomes || data.outcomes.length === 0) {
+                    container.innerHTML = '<p class="text-slate-400">✓ All outcomes performing well (≥70%).</p>';
+                    return;
+                }
+                
+                let html = '';
+                data.outcomes.forEach(o => {
+                    const riskColor = o.risk_level === 'Critical' ? 'text-red-700 bg-red-50' : o.risk_level === 'High' ? 'text-orange-700 bg-orange-50' : 'text-yellow-700 bg-yellow-50';
+                    html += `<div class="p-3 rounded-lg ${riskColor} text-sm"><div class="font-bold">${o.code}</div><div class="text-xs mt-1">${o.attainment}% attainment (${o.count} responses) — ${o.risk_level} Risk</div></div>`;
+                });
+                container.innerHTML = html;
+            } catch(e) {
+                document.getElementById('lowOutcomesContainer').innerHTML = '<p class="text-red-500 text-xs">Error loading outcomes.</p>';
+            }
+        }
+
+        window.generateFollowupQuestions = async function() {
+            if (!currentFormId) return alert('Select a form first.');
+            document.getElementById('followupModal').classList.remove('hidden');
+            document.getElementById('followupQuestionsContent').innerHTML = `
+                <div class="flex flex-col items-center justify-center py-10">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mb-4"></div>
+                    <p class="text-slate-500 font-medium">Analyzing feedback patterns...</p>
+                </div>`;
+            
+            try {
+                const res = await fetch('/api/suggest_followup_questions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ form_id: currentFormId })
+                });
+                const data = await res.json();
+                
+                if (res.status === 401) {
+                    document.getElementById('followupQuestionsContent').innerHTML = '<p class="text-amber-600">Session expired.</p>';
+                    handleUnauthorized('Session expired.');
+                    return;
+                }
+                
+                if (!data.questions || data.questions.length === 0) {
+                    document.getElementById('followupQuestionsContent').innerHTML = '<p class="text-slate-400">No suggestions available. Ensure there is feedback data.</p>';
+                    return;
+                }
+                
+                let html = '';
+                data.questions.forEach((q, i) => {
+                    html += `
+                        <div class="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                            <div class="flex items-start gap-2 mb-2">
+                                <input type="checkbox" class="followup-checkbox mt-1" value='${JSON.stringify(q).replace(/'/g, "&#39;")}' checked>
+                                <div class="flex-1">
+                                    <p class="font-semibold text-sm text-slate-800">${q.text}</p>
+                                    <p class="text-xs text-slate-500 mt-1">Type: ${q.type.replace('_', ' ')}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                document.getElementById('followupQuestionsContent').innerHTML = html;
+            } catch(e) {
+                document.getElementById('followupQuestionsContent').innerHTML = '<p class="text-red-500">Failed to generate suggestions.</p>';
+            }
+        }
+
+        window.addFollowupToForm = function() {
+            const checkboxes = document.querySelectorAll('.followup-checkbox:checked');
+            if (checkboxes.length === 0) return alert('Select at least one question.');
+            
+            checkboxes.forEach(cb => {
+                try {
+                    const q = JSON.parse(cb.value);
+                    questions.push({
+                        text: q.text,
+                        type: q.type || 'rating_5',
+                        required: q.required !== false,
+                        mappings: q.mappings || [],
+                        ai_generated: true,
+                        confidence: q.confidence || 0.75,
+                        mapping_source: q.mapping_source || 'ai'
+                    });
+                } catch(e) {}
+            });
+            
+            openDropdowns.clear();
+            renderBuilder();
+            document.getElementById('builderModal').classList.remove('hidden');
+            document.getElementById('followupModal').classList.add('hidden');
+            alert(`${checkboxes.length} follow-up question(s) added. Review and save.`);
         }
 
         async function loadAttainment(formId) {
             if(!formId) return;
             try {
                 const res = await fetch(`/api/attainment?form_id=${formId}&t=${Date.now()}`);
+                if (res.status === 401) {
+                    handleUnauthorized('Session expired. Please login again.');
+                    return;
+                }
                 const data = await res.json();
                 
                 document.getElementById('totalStudents').innerText = data.total || 0;

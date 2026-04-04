@@ -8,11 +8,15 @@ import re
 import logging
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, make_response
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from datetime import datetime
 from fpdf import FPDF
 from textblob import TextBlob
 from better_profanity import profanity
 from werkzeug.middleware.proxy_fix import ProxyFix
+from logging.handlers import RotatingFileHandler
+import os as os_module
 try:
     from groq import Groq
 except Exception:
@@ -27,9 +31,40 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+try:
+    import importlib
+    _dotenv = importlib.import_module("dotenv")
+    _load_dotenv = getattr(_dotenv, "load_dotenv", None)
+    if callable(_load_dotenv):
+        _load_dotenv()
+except Exception:
+    pass
+
 app = Flask(__name__)
 APP_ENV = os.getenv("FLASK_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
+
+# Rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# Structured logging
+if not app.debug and IS_PRODUCTION:
+    log_dir = os.path.join(app.instance_path, "logs")
+    os_module.makedirs(log_dir, exist_ok=True)
+    file_handler = RotatingFileHandler(os.path.join(log_dir, "app.log"), maxBytes=10240000, backupCount=10)
+    file_handler.setFormatter(logging.Formatter(
+        '[%(asctime)s] %(levelname)s in %(module)s: %(message)s [%(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+else:
+    logging.basicConfig(level=logging.DEBUG)
 
 _secret_key = os.getenv("FLASK_SECRET_KEY", "").strip()
 if not _secret_key:
@@ -96,12 +131,68 @@ def apply_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' https://cdn.tailwindcss.com; img-src 'self' data: https:; font-src 'self'; connect-src 'self'"
+    response.headers["Cache-Control"] = "public, max-age=3600" if request.path.startswith('/static/') else "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     if IS_PRODUCTION:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     return response
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+
+PO_LIST_FULL = [
+    "PO1", "PO2", "PO3", "PO4", "PO5", "PO6",
+    "PO7", "PO8", "PO9", "PO10", "PO11", "PO12"
+]
+PSO_LIST_FULL = ["PSO1", "PSO2", "PSO3"]
+PEO_LIST_FULL = ["PEO1", "PEO2", "PEO3"]
+
+PO_DESCRIPTIONS = {
+    "PO1": "Engineering knowledge",
+    "PO2": "Problem analysis",
+    "PO3": "Design/development of solutions",
+    "PO4": "Conduct investigations of complex problems",
+    "PO5": "Modern tool usage",
+    "PO6": "The engineer and society",
+    "PO7": "Environment and sustainability",
+    "PO8": "Ethics",
+    "PO9": "Individual and teamwork",
+    "PO10": "Communication",
+    "PO11": "Project management and finance",
+    "PO12": "Life-long learning",
+}
+
+QUESTION_THEMES = [
+    ("PO1", {"understand", "concept", "fundamental", "theory", "knowledge", "explain", "learn", "basics", "clarity", "clear", "comprehend", "grasp", "foundational", "principle"}),
+    ("PO2", {"problem", "analyze", "analysis", "reason", "solve", "critical", "identify", "diagnose", "troubleshoot", "investigate", "explore", "examine", "scrutinize", "decompose"}),
+    ("PO3", {"design", "develop", "implement", "build", "create", "solution", "application", "architecture", "construct", "engineer", "develop", "prototype", "specification"}),
+    ("PO4", {"investigate", "experiment", "evaluate", "measure", "compare", "test", "evidence", "research", "assess", "verify", "validate", "benchmark", "analysis", "empirical"}),
+    ("PO5", {"tool", "software", "lab", "technology", "modern", "program", "code", "simulation", "apparatus", "instrument", "platform", "framework", "library", "api"}),
+    ("PO6", {"society", "community", "professional", "impact", "responsibility", "public", "stakeholder", "welfare", "social", "humanity", "development"}),
+    ("PO7", {"environment", "sustainability", "green", "waste", "energy", "climate", "carbon", "emissions", "resource", "eco", "conservation"}),
+    ("PO8", {"ethic", "ethical", "integrity", "responsible", "fair", "moral", "honesty", "compliance", "confidentiality", "biased", "discrimination"}),
+    ("PO9", {"team", "group", "collaborat", "peer", "individual", "participat", "cooperative", "synerg", "multidisciplinary", "diversity", "leadership"}),
+    ("PO10", {"communication", "present", "presentation", "report", "write", "explain", "interaction", "articulate", "document", "verbal", "graphical", "listen"}),
+    ("PO11", {"project", "manage", "planning", "deadline", "schedule", "estimate", "budget", "resource", "timeline", "finance", "delivery"}),
+    ("PO12", {"learn", "latest", "update", "self", "life-long", "lifelong", "adapt", "continuous", "professional", "development", "emerging", "innovation"}),
+]
+
+QUESTION_SEMANTIC_HINTS = [
+    ("understanding", {"understand", "explain", "concept", "theory", "clarity", "basics", "fundamental", "knowledge"}, ["CO1", "PO1"]),
+    ("analysis", {"analyze", "analysis", "problem", "solve", "reason", "critical", "identify"}, ["CO2", "PO2"]),
+    ("design", {"design", "develop", "implement", "build", "create", "application", "solution"}, ["CO3", "PO3", "PO5"]),
+    ("evaluation", {"evaluate", "test", "assessment", "feedback", "improve", "review", "measure"}, ["CO4", "PO4", "PO8"]),
+    ("project", {"project", "plan", "schedule", "estimate", "manage", "deadline", "delivery"}, ["CO4", "PO11"]),
+    ("lab", {"lab", "software", "tool", "program", "system", "technology", "simulation", "practical"}, ["CO3", "CO4", "PO5"]),
+    ("teamwork", {"team", "group", "peer", "collaborat", "participat", "together"}, ["PO9", "PO10"]),
+    ("communication", {"communication", "present", "presentation", "report", "write", "explain", "communicat"}, ["PO10"]),
+    ("ethics", {"ethic", "ethical", "integrity", "responsible", "fair", "honest"}, ["PO8"]),
+    ("society", {"society", "community", "impact", "responsibility", "professional"}, ["PO6"]),
+    ("environment", {"environment", "sustainability", "green", "waste", "energy"}, ["PO7"]),
+    ("lifelong", {"learn", "latest", "update", "self", "lifelong", "adapt"}, ["PO12"]),
+]
 
 BRAND_COLLEGE_NAME = os.getenv("BRAND_COLLEGE_NAME", "Department of Computer Science and Engineering")
 BRAND_LOGO_URL = os.getenv("BRAND_LOGO_URL", "/static/img/logo.png")
@@ -161,6 +252,283 @@ def load_gemini_candidates():
         if name and name not in ordered:
             ordered.append(name)
     return ordered
+
+
+def clean_question_text(text):
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    cleaned = cleaned.lstrip("-•*0123456789. ")
+    if not cleaned:
+        return ""
+    if not cleaned.endswith("?"):
+        cleaned = f"{cleaned}?"
+    return cleaned
+
+
+def get_allowed_mapping_keys(course_name=None):
+    keys = set(PO_LIST_FULL + PSO_LIST_FULL + PEO_LIST_FULL)
+    for co_text in COURSE_DATA_DB.get(course_name, []):
+        code = str(co_text).split(":", 1)[0].strip()
+        if code:
+            keys.add(code)
+    for course_outcomes in COURSE_DATA_DB.values():
+        for co_text in course_outcomes:
+            code = str(co_text).split(":", 1)[0].strip()
+            if code:
+                keys.add(code)
+    return keys
+
+
+def tokenize_text(text):
+    text = re.sub(r"[^a-z0-9\s]", " ", str(text or "").lower())
+    return {token for token in text.split() if len(token) > 2}
+
+
+def score_outcomes(question_text, course_name=None):
+    question_tokens = tokenize_text(question_text)
+    scored = []
+
+    for co_text in COURSE_DATA_DB.get(course_name, []):
+        code, description = str(co_text).split(":", 1) if ":" in str(co_text) else (str(co_text), str(co_text))
+        code = code.strip().upper()
+        desc_tokens = tokenize_text(description)
+        overlap = len(question_tokens & desc_tokens)
+        bonus = 0
+        if any(term in question_tokens for term in {"understand", "concept", "theory", "explain"}) and code.endswith("1"):
+            bonus += 1
+        if any(term in question_tokens for term in {"design", "develop", "implement", "build"}) and code.endswith("3"):
+            bonus += 1
+        if any(term in question_tokens for term in {"analyze", "analysis", "solve", "problem"}) and code.endswith("2"):
+            bonus += 1
+        if any(term in question_tokens for term in {"project", "estimate", "schedule"}) and code.endswith("4"):
+            bonus += 1
+        if any(term in question_tokens for term in {"ethic", "team", "present", "tool", "lab", "environment", "learn"}) and code.endswith("5"):
+            bonus += 1
+        scored.append((code, overlap + bonus))
+
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    hits = [code for code, score in scored if score > 0]
+    return hits[:4]
+
+
+def score_po_outcomes(question_text):
+    question_tokens = tokenize_text(question_text)
+    scored = []
+
+    for po_code, keywords in QUESTION_THEMES:
+        overlap = len(question_tokens & keywords)
+        
+        # Boost scoring for specific matches
+        if po_code == "PO1" and any(term in question_tokens for term in {"understand", "explain", "concept", "theory", "clarity", "clear"}):
+            overlap += 2
+        if po_code == "PO2" and any(term in question_tokens for term in {"problem", "analyze", "analysis", "solve", "critical"}):
+            overlap += 2
+        if po_code == "PO3" and any(term in question_tokens for term in {"design", "develop", "implement", "build", "create"}):
+            overlap += 2
+        if po_code == "PO4" and any(term in question_tokens for term in {"investigate", "experiment", "evaluate", "test", "research"}):
+            overlap += 2
+        if po_code == "PO5" and any(term in question_tokens for term in {"lab", "software", "tool", "program", "system", "code"}):
+            overlap += 2
+        if po_code == "PO6" and any(term in question_tokens for term in {"society", "community", "professional", "impact"}):
+            overlap += 2
+        if po_code == "PO7" and any(term in question_tokens for term in {"environment", "sustainability", "green", "energy"}):
+            overlap += 2
+        if po_code == "PO8" and any(term in question_tokens for term in {"ethic", "ethical", "integrity", "responsible"}):
+            overlap += 2
+        if po_code == "PO9" and any(term in question_tokens for term in {"team", "group", "collaborat", "peer"}):
+            overlap += 2
+        if po_code == "PO10" and any(term in question_tokens for term in {"present", "explain", "share", "communicat", "feedback", "report", "write"}):
+            overlap += 2
+        if po_code == "PO11" and any(term in question_tokens for term in {"project", "manage", "plan", "deadline", "schedule"}):
+            overlap += 2
+        if po_code == "PO12" and any(term in question_tokens for term in {"learn", "latest", "update", "self", "lifelong", "adapt"}):
+            overlap += 2
+            
+        if overlap > 0:
+            scored.append((po_code, overlap))
+
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    hits = [code for code, score in scored if score > 0]
+    return hits  # Return all matching POs, not just top 4
+
+
+def infer_question_theme(question_text):
+    tokens = tokenize_text(question_text)
+    best_score = 0
+    best_codes = []
+
+    for _, keywords, codes in QUESTION_SEMANTIC_HINTS:
+        score = len(tokens & keywords)
+        if score > best_score:
+            best_score = score
+            best_codes = list(codes)
+        elif score and score == best_score:
+            for code in codes:
+                if code not in best_codes:
+                    best_codes.append(code)
+
+    return best_codes[:4]
+
+
+def fallback_mappings_for_question(question_text, course_name=None):
+    co_hits = score_outcomes(question_text, course_name)
+    po_hits = score_po_outcomes(question_text)
+    semantic_hits = infer_question_theme(question_text)
+
+    fallback = []
+    for code in semantic_hits + co_hits + po_hits:
+        if code and code not in fallback:
+            fallback.append(code)
+
+    if not fallback and course_name:
+        fallback = [str(item).split(":", 1)[0].strip().upper() for item in COURSE_DATA_DB.get(course_name, [])[:3]]
+
+    if not fallback:
+        fallback = ["PO10", "PO5"]
+
+    return fallback[:5]
+
+
+def mapping_type(code):
+    code = str(code or "").upper()
+    if code.startswith("CO"):
+        return "CO"
+    if code.startswith("PO"):
+        return "PO"
+    if code.startswith("PSO"):
+        return "PSO"
+    if code.startswith("PEO"):
+        return "PEO"
+    return "OTHER"
+
+
+def infer_semantic_nba_mappings(question_text, course_name=None, topic=""):
+    text = str(question_text or "").strip()
+    if not text:
+        return []
+
+    tokens = tokenize_text(text)
+    topic_tokens = tokenize_text(topic)
+    co_hits = score_outcomes(text, course_name)
+    po_hits = score_po_outcomes(text)
+    semantic_hits = infer_question_theme(text)
+
+    ranked = []
+    for code in co_hits[:3]:
+        if code not in ranked:
+            ranked.append(code)
+    for code in po_hits[:4]:
+        if code not in ranked:
+            ranked.append(code)
+    for code in semantic_hits[:4]:
+        if code not in ranked:
+            ranked.append(code)
+
+    # Add PSO/PEO only when question signals broader professional goals.
+    if tokens & {"industry", "career", "professional", "placement"}:
+        ranked.extend(["PEO1", "PEO2"])
+    if tokens & {"design", "develop", "model", "solution", "software", "system"}:
+        ranked.append("PSO1")
+    if tokens & {"problem", "analyze", "analysis", "optimize"}:
+        ranked.append("PSO2")
+    if tokens & {"project", "implement", "deploy", "integration"}:
+        ranked.append("PSO3")
+
+    if topic_tokens & {"lab", "practical", "implementation", "tool"} and "PO5" not in ranked:
+        ranked.append("PO5")
+
+    deduped = []
+    for code in ranked:
+        if code and code not in deduped:
+            deduped.append(code)
+    return deduped[:8]
+
+
+def build_diverse_mapping_set(ai_mappings, semantic_mappings, allowed, max_items=5):
+    ai_mappings = [m for m in ai_mappings if m in allowed]
+    semantic_mappings = [m for m in semantic_mappings if m in allowed]
+
+    ordered = []
+    for code in ai_mappings + semantic_mappings:
+        if code not in ordered:
+            ordered.append(code)
+
+    # Prefer at least one CO and one PO whenever available.
+    selected = []
+    for required_type in ("CO", "PO"):
+        for code in ordered:
+            if mapping_type(code) == required_type and code not in selected:
+                selected.append(code)
+                break
+
+    # Fill remaining slots while keeping type diversity.
+    type_counts = {}
+    for code in selected:
+        t = mapping_type(code)
+        type_counts[t] = type_counts.get(t, 0) + 1
+
+    for code in ordered:
+        if code in selected:
+            continue
+        t = mapping_type(code)
+        if len(selected) >= max_items:
+            break
+        # Soft cap duplicates of same type if alternatives exist.
+        if type_counts.get(t, 0) >= 2 and any(mapping_type(c) != t and c not in selected for c in ordered):
+            continue
+        selected.append(code)
+        type_counts[t] = type_counts.get(t, 0) + 1
+
+    return selected[:max_items]
+
+
+def sanitize_question_payload(questions, course_name=None):
+    allowed_types = {"rating_3", "rating_5", "text"}
+    allowed_mappings = get_allowed_mapping_keys(course_name)
+    sanitized = []
+    seen = set()
+
+    for question in questions or []:
+        if isinstance(question, str):
+            question = {"text": question}
+        if not isinstance(question, dict):
+            continue
+
+        text = clean_question_text(question.get("text", ""))
+        if not text or text.lower() in seen:
+            continue
+
+        question_type = str(question.get("type", "rating_5")).strip()
+        if question_type not in allowed_types:
+            question_type = "rating_5"
+
+        confidence = question.get("confidence", question.get("mapping_confidence", 0))
+        try:
+            confidence = float(confidence)
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        raw_mappings = question.get("mappings", []) or []
+        if not isinstance(raw_mappings, list):
+            raw_mappings = []
+        mappings = []
+        for mapping in raw_mappings:
+            code = str(mapping or "").strip().upper()
+            if code in allowed_mappings and code not in mappings:
+                mappings.append(code)
+
+        sanitized.append({
+            "text": text,
+            "type": question_type,
+            "required": bool(question.get("required", True)),
+            "mappings": mappings,
+            "ai_generated": bool(question.get("ai_generated", question.get("source") == "ai")),
+            "confidence": confidence,
+            "mapping_source": str(question.get("mapping_source", question.get("source", "manual"))),
+        })
+        seen.add(text.lower())
+
+    return sanitized
 
 try:
     if GEMINI_API_KEY and genai:
@@ -334,8 +702,40 @@ init_db()
 
 @app.route('/')
 def landing(): return render_template('landing.html')
+
 @app.route('/healthz')
-def healthz(): return jsonify({"status": "ok"})
+def healthz():
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT 1")
+        conn.close()
+        return jsonify({"status": "ok", "database": "connected"}), 200
+    except Exception as e:
+        app.logger.error(f"Health check failed: {str(e)}")
+        return jsonify({"status": "error", "database": "disconnected"}), 503
+
+@app.route('/metrics')
+def metrics():
+    if 'user' not in session and not request.headers.get('X-Internal-Key') == os.getenv('INTERNAL_METRICS_KEY', ''):
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        conn = get_db_connection(row_factory=True); c = conn.cursor()
+        c.execute("SELECT COUNT(*) as count FROM responses")
+        total_responses = c.fetchone()['count']
+        c.execute("SELECT COUNT(*) as count FROM forms")
+        total_forms = c.fetchone()['count']
+        c.execute("SELECT COUNT(*) as count FROM forms WHERE is_active = 1")
+        active_forms = c.fetchone()['count']
+        conn.close()
+        return jsonify({
+            "total_responses": total_responses,
+            "total_forms": total_forms,
+            "active_forms": active_forms
+        }), 200
+    except Exception as e:
+        app.logger.error(f"Metrics endpoint error: {str(e)}")
+        return jsonify({"error": "Metrics unavailable"}), 503
 @app.route('/student')
 def student():
     response = make_response(render_template('student.html', brand=get_branding_context()))
@@ -358,37 +758,49 @@ def logout(): session.pop('user', None); return redirect(url_for('landing'))
 
 # --- CORE API ---
 @app.route('/api/create_form', methods=['POST'])
+@limiter.limit("10 per minute")
 def create_form():
     if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
-    data = request.json
-    questions = data.get('questions') or []
-    for q in questions:
-        if 'required' not in q:
-            q['required'] = True
+    try:
+        data = request.json or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Invalid request format"}), 400
+        
+        title = str(data.get('title') or "").strip()[:200]
+        course_name = str(data.get('course_name') or "").strip()[:200]
+        if not title or not course_name:
+            return jsonify({"error": "Title and course name required"}), 400
+        
+        questions = sanitize_question_payload(data.get('questions') or [], course_name)
+        if not questions:
+            return jsonify({"error": "At least one valid question is required."}), 400
 
-    form_token = uuid.uuid4().hex[:12]
-    conn = get_db_connection(); c = conn.cursor()
-    c.execute("INSERT INTO forms (title, course_name, structure, created_at, start_at, end_at, public_token) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-              (
-                  data.get('title'),
-                  data.get('course_name'),
-                  json.dumps(questions),
-                  datetime.now().strftime("%Y-%m-%d"),
-                  data.get('start_at') or None,
-                  data.get('end_at') or None,
-                  form_token
-              ))
-    conn.commit(); conn.close()
-    return jsonify({"status": "success"})
+        form_token = uuid.uuid4().hex[:12]
+        conn = get_db_connection(); c = conn.cursor()
+        c.execute("INSERT INTO forms (title, course_name, structure, created_at, start_at, end_at, public_token) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                  (
+                      title,
+                      course_name,
+                      json.dumps(questions),
+                      datetime.now().strftime("%Y-%m-%d"),
+                      data.get('start_at') or None,
+                      data.get('end_at') or None,
+                      form_token
+                  ))
+        conn.commit(); conn.close()
+        app.logger.info(f"Form created: {title} (ID: will be auto-incremented)")
+        return jsonify({"status": "success"}), 201
+    except Exception as e:
+        app.logger.error(f"Error creating form: {str(e)}")
+        return jsonify({"error": "Failed to create form"}), 500
 
 @app.route('/api/edit_form', methods=['POST'])
 def edit_form():
     if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
     data = request.json
-    questions = data.get('questions') or []
-    for q in questions:
-        if 'required' not in q:
-            q['required'] = True
+    questions = sanitize_question_payload(data.get('questions') or [], data.get('course_name'))
+    if not questions:
+        return jsonify({"error": "At least one valid question is required."}), 400
 
     conn = get_db_connection(); c = conn.cursor()
     c.execute("UPDATE forms SET title=?, course_name=?, structure=?, start_at=?, end_at=? WHERE id=?", 
@@ -474,10 +886,17 @@ def toggle_form():
     return jsonify({"status": "success"})
 
 @app.route('/api/submit_feedback', methods=['POST'])
+@limiter.limit("30 per hour")
 def submit_feedback():
     try:
-        data = request.json
+        data = request.json or {}
+        if not isinstance(data, dict):
+            return jsonify({"status": "error", "message": "Invalid request format"}), 400
+        
         answers = data.get('answers', [])
+        if not isinstance(answers, list):
+            return jsonify({"status": "error", "message": "Invalid answers format"}), 400
+        
         submitter_key = get_submitter_key()
 
         conn = get_db_connection(row_factory=True); c = conn.cursor()
@@ -559,8 +978,8 @@ def normalize_question(text):
         cleaned = f"{cleaned}?"
     return cleaned
 
-def fallback_suggested_questions(course_name, event_title):
-    context_label = course_name or event_title or "this course"
+def fallback_suggested_questions(course_name, event_title, topic=""):
+    context_label = topic or course_name or event_title or "this course"
     suggestions = [
         f"How clearly were the concepts in {context_label} explained?",
         f"How effectively did {context_label} improve your understanding of key topics?",
@@ -586,6 +1005,85 @@ def fallback_suggested_questions(course_name, event_title):
             seen.add(q.lower())
     return deduped[:8]
 
+
+def parse_ai_question_payload(raw_text, course_name=None):
+    allowed_mappings = sorted(get_allowed_mapping_keys(course_name))
+    text = str(raw_text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+
+    payload = None
+    try:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            payload = json.loads(text[start:end + 1])
+    except Exception:
+        payload = None
+
+    candidate_items = []
+    if isinstance(payload, dict):
+        candidate_items = payload.get("questions", []) or []
+    elif isinstance(payload, list):
+        candidate_items = payload
+    else:
+        candidate_items = [line.strip() for line in text.splitlines() if line.strip()]
+
+    normalized = []
+    seen = set()
+    for item in candidate_items:
+        if isinstance(item, str):
+            item = {"text": item}
+        if not isinstance(item, dict):
+            continue
+
+        question_text = clean_question_text(item.get("text", ""))
+        if not question_text or question_text.lower() in seen:
+            continue
+
+        question_type = str(item.get("type", "rating_5")).strip()
+        if question_type not in {"rating_3", "rating_5", "text"}:
+            question_type = "rating_5"
+
+        confidence = item.get("confidence", item.get("mapping_confidence", 0.78))
+        try:
+            confidence = float(confidence)
+        except Exception:
+            confidence = 0.78
+        confidence = max(0.0, min(1.0, confidence))
+
+        mappings = []
+        for mapping in item.get("mappings", []) or []:
+            code = str(mapping or "").strip().upper()
+            if code in allowed_mappings and code not in mappings:
+                mappings.append(code)
+
+        if not mappings:
+            mappings = [code for code in fallback_mappings_for_question(question_text, course_name) if code in allowed_mappings]
+        else:
+            semantic = [code for code in fallback_mappings_for_question(question_text, course_name) if code in allowed_mappings]
+            merged = []
+            for code in semantic + mappings:
+                if code not in merged:
+                    merged.append(code)
+            mappings = merged[:5]
+
+        if mappings and set(mappings).issubset({"CO1", "PO1"}):
+            mappings = [code for code in fallback_mappings_for_question(question_text, course_name) if code in allowed_mappings][:5]
+
+        normalized.append({
+            "text": question_text,
+            "type": question_type,
+            "required": bool(item.get("required", True)),
+            "mappings": mappings,
+            "ai_generated": True,
+            "confidence": confidence,
+            "mapping_source": "ai",
+            "source": "ai",
+        })
+        seen.add(question_text.lower())
+
+    return normalized
+
 @app.route('/api/ai/suggest_questions', methods=['POST'])
 def ai_suggest_questions():
     if 'user' not in session:
@@ -594,35 +1092,181 @@ def ai_suggest_questions():
     data = request.json or {}
     course_name = str(data.get('course_name', '')).strip()
     event_title = str(data.get('event_title', '')).strip()
-    fallback = fallback_suggested_questions(course_name, event_title)
+    topic = str(data.get('topic', '')).strip()
+    fallback = fallback_suggested_questions(course_name, event_title, topic)
 
     if not ai_provider:
-        return jsonify({"questions": fallback, "source": "fallback"})
+        return jsonify({"questions": [{"text": q, "type": "rating_5", "required": True, "mappings": [], "ai_generated": False, "confidence": 0.0, "mapping_source": "fallback", "source": "fallback"} for q in fallback], "source": "fallback"})
 
     prompt = (
         "Generate 6 concise student feedback questions for a college feedback form. "
-        "Return only plain lines, one question per line, no numbering, no markdown, max 18 words each. "
-        "Include at least 2 outcome-focused questions.\n"
+        "Return STRICT JSON only, no markdown, with this shape: "
+        "{\"questions\":[{\"text\":\"...\",\"type\":\"rating_5\",\"required\":true,\"mappings\":[\"CO1\",\"PO2\"],\"confidence\":0.84}]}. "
+        "Use only these question types: rating_3, rating_5, text. "
+        "Use only allowed mapping keys and keep questions clear, short, and non-duplicated. "
+        "Include at least 2 questions tied to outcomes or learning impact.\n"
         f"Course: {course_name or 'N/A'}\n"
-        f"Event: {event_title or 'N/A'}"
+        f"Topic: {topic or event_title or 'N/A'}\n"
+        f"Allowed mappings: {', '.join(sorted(get_allowed_mapping_keys(course_name)))}"
     )
 
     try:
-        raw = ai_generate_text("You create clear, short feedback form questions.", prompt)
-        candidates = [normalize_question(line) for line in raw.splitlines()]
-        candidates = [q for q in candidates if q]
+        raw = ai_generate_text("You create clear, short feedback form questions and return JSON only.", prompt)
+        candidates = parse_ai_question_payload(raw, course_name)
+        if not candidates:
+            candidates = [{"text": q, "type": "rating_5", "required": True, "mappings": [], "ai_generated": False, "confidence": 0.0, "mapping_source": "fallback", "source": "fallback"} for q in fallback]
+            return jsonify({"questions": candidates, "source": "fallback"})
 
-        deduped = []
-        seen = set()
-        for q in candidates:
-            k = q.lower()
-            if k not in seen:
-                deduped.append(q)
-                seen.add(k)
-
-        return jsonify({"questions": (deduped[:8] or fallback), "source": "ai"})
+        return jsonify({"questions": candidates[:8], "source": "ai"})
     except Exception:
-        return jsonify({"questions": fallback, "source": "fallback"})
+        return jsonify({"questions": [{"text": q, "type": "rating_5", "required": True, "mappings": [], "ai_generated": False, "confidence": 0.0, "mapping_source": "fallback", "source": "fallback"} for q in fallback], "source": "fallback"})
+
+
+@app.route('/api/ai/regenerate_question', methods=['POST'])
+def ai_regenerate_question():
+    if 'user' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.json or {}
+    course_name = str(data.get('course_name', '')).strip()
+    event_title = str(data.get('event_title', '')).strip()
+    topic = str(data.get('topic', '')).strip()
+    seed = str(data.get('seed_text', '')).strip()
+    index = int(data.get('index', 0) or 0)
+
+    fallback = fallback_suggested_questions(course_name, event_title, topic)
+    fallback_text = fallback[min(index, len(fallback) - 1)] if fallback else "How would you rate your learning experience?"
+
+    if not ai_provider:
+        return jsonify({"question": {"text": fallback_text, "type": "rating_5", "required": True, "mappings": [], "ai_generated": False, "confidence": 0.0, "mapping_source": "fallback", "source": "fallback"}, "source": "fallback"})
+
+    prompt = (
+        "Regenerate one concise student feedback question for a college feedback form. "
+        "Return STRICT JSON only with this shape: "
+        "{\"text\":\"...\",\"type\":\"rating_5\",\"required\":true,\"confidence\":0.84}. "
+        "Use only one question, keep it clear, non-duplicated, and at most 18 words.\n"
+        f"Course: {course_name or 'N/A'}\n"
+        f"Topic: {topic or event_title or 'N/A'}\n"
+        f"Seed question: {seed or fallback_text}\n"
+        f"Preferred style: {data.get('type', 'rating_5')}"
+    )
+
+    try:
+        raw = ai_generate_text("You rewrite one feedback question and return JSON only.", prompt)
+        parsed = parse_ai_question_payload(raw, course_name)
+        question = parsed[0] if parsed else None
+        if not question:
+            raise ValueError("No valid question returned")
+        question.pop("source", None)
+        return jsonify({"question": question, "source": "ai"})
+    except Exception:
+        return jsonify({"question": {"text": fallback_text, "type": "rating_5", "required": True, "mappings": [], "ai_generated": False, "confidence": 0.0, "mapping_source": "fallback", "source": "fallback"}, "source": "fallback"})
+
+
+@app.route('/api/ai/suggest_mappings', methods=['POST'])
+def ai_suggest_mappings():
+    if 'user' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.json or {}
+    course_name = str(data.get('course_name', '')).strip()
+    topic = str(data.get('topic', '')).strip()
+    question_text = clean_question_text(data.get('question_text', ''))
+    question_type = str(data.get('type', 'rating_5')).strip()
+
+    allowed = sorted(get_allowed_mapping_keys(course_name))
+    if not question_text:
+        return jsonify({"error": "Question text is required."}), 400
+
+    semantic_seed = infer_semantic_nba_mappings(question_text, course_name, topic)
+    fallback = fallback_mappings_for_question(question_text, course_name)
+    fallback = [item for item in (semantic_seed + fallback) if item in allowed]
+    fallback = list(dict.fromkeys(fallback))
+
+    if not ai_provider:
+        return jsonify({"mappings": fallback[:4], "confidence": 0.0, "source": "fallback"})
+
+    course_outcomes = COURSE_DATA_DB.get(course_name, [])
+    course_outcome_context = "\n".join([f"- {item}" for item in course_outcomes]) if course_outcomes else "- No course outcomes available"
+    po_context = "\n".join([f"- {code}: {desc}" for code, desc in PO_DESCRIPTIONS.items()])
+    semantic_hint = ", ".join(fallback[:4]) if fallback else "N/A"
+
+    prompt = (
+        "You are an NBA (National Board of Accreditation) outcomes mapping expert. "
+        "Map the following student feedback question to the MOST RELEVANT and DIVERSE NBA outcomes. "
+        "CRITICAL: Choose different outcomes based on question meaning, NOT by matching code numbers. "
+        "Return STRICT JSON only in the form: {\"mappings\":[\"CO2\",\"PO5\"],\"confidence\":0.88}.\n\n"
+        "MAPPING GUIDELINES:\n"
+        "- For understanding/basics questions → Map to PO1, CO1\n"
+        "- For problem-solving/analysis → Map to PO2, CO2 or PO4, CO4\n"
+        "- For design/implementation → Map to PO3, CO3 or PO5 (tools)\n"
+        "- For lab/tools/software questions → Map to PO5, CO3, CO4\n"
+        "- For teamwork/communication → Map to PO9, PO10\n"
+        "- For ethics/responsibility → Map to PO6, PO8\n"
+        "- For sustainability → Map to PO7\n"
+        "- For project/management → Map to PO11\n"
+        "- For lifelong learning → Map to PO12\n\n"
+        "IMPORTANT:\n"
+        "- Return 2 to 5 mappings max\n"
+        "- Spread across DIFFERENT outcome types (CO, PO, PSO, PEO)\n"
+        "- AVOID generic-only outputs like all CO1 or all PO1\n"
+        "- MUST map based on question MEANING and CONTEXT, not code sequence\n"
+        "- Use only allowed mapping keys from the list below\n\n"
+        f"Course: {course_name or 'N/A'}\n"
+        f"Topic: {topic or 'N/A'}\n"
+        f"Question: {question_text}\n"
+        f"Question type: {question_type}\n"
+        f"Semantic hint: {semantic_hint}\n"
+        f"Course outcomes:\n{course_outcome_context}\n"
+        f"PO descriptors (12 outcomes):\n{po_context}\n"
+        f"Allowed mappings: {', '.join(allowed)}"
+    )
+
+    try:
+        raw = ai_generate_text("You map a feedback question to valid CO/PO outcomes and return JSON only.", prompt)
+        parsed = None
+        try:
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(raw or "").strip(), flags=re.IGNORECASE)
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                parsed = json.loads(cleaned[start:end + 1])
+        except Exception:
+            parsed = None
+
+        mappings = []
+        if isinstance(parsed, dict):
+            for mapping in parsed.get("mappings", []) or []:
+                code = str(mapping or "").strip().upper()
+                if code in allowed and code not in mappings:
+                    mappings.append(code)
+
+        try:
+            confidence = float(parsed.get("confidence", 0.78) if isinstance(parsed, dict) else 0.78)
+        except Exception:
+            confidence = 0.78
+        confidence = max(0.0, min(1.0, confidence))
+
+        if not mappings:
+            mappings = fallback[:5]
+
+        generic_only = mappings and set(mappings).issubset({"CO1", "PO1"})
+        if generic_only:
+            mappings = fallback[:5]
+            confidence = 0.35 if mappings else 0.0
+
+        if not mappings:
+            mappings = fallback[:5]
+
+        semantic = infer_semantic_nba_mappings(question_text, course_name, topic)
+        mappings = build_diverse_mapping_set(mappings, semantic + fallback, allowed, max_items=5)
+
+        if not mappings:
+            mappings = fallback[:5]
+
+        return jsonify({"mappings": mappings[:5], "confidence": confidence, "source": "ai"})
+    except Exception:
+        return jsonify({"mappings": fallback[:4], "confidence": 0.0, "source": "fallback"})
 
 @app.route('/api/ai/report', methods=['POST'])
 def ai_report():
@@ -643,6 +1287,127 @@ def ai_report():
         )
         return jsonify({"report": report.replace('```html', '').replace('```', '')})
     except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/outcome_risk', methods=['GET'])
+def outcome_risk():
+    if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
+    form_id = request.args.get('form_id')
+    if not form_id:
+        return jsonify({"error": "form_id required"}), 400
+    
+    conn = get_db_connection(row_factory=True); c = conn.cursor()
+    c.execute("SELECT * FROM forms WHERE id = ?", (form_id,))
+    form_data = c.fetchone()
+    
+    if not form_data:
+        conn.close()
+        return jsonify({"error": "Form not found"}), 404
+    
+    c.execute("SELECT * FROM responses WHERE form_id = ?", (form_id,))
+    responses = c.fetchall()
+    conn.close()
+    
+    stats = {}
+    for resp in responses:
+        try:
+            answers = json.loads(resp['answers_json'])
+            q_map = {}
+            c2 = get_db_connection(row_factory=True).cursor()
+            c2.execute("SELECT * FROM forms WHERE id = ?", (form_id,))
+            form_row = c2.fetchone()
+            if form_row:
+                struct = json.loads(form_row['structure'] or '[]')
+                for q in struct:
+                    q_map[q.get('text', '')] = q.get('mappings', [])
+            c2.connection.close()
+            
+            for ans in answers:
+                q_text = ans.get('question', '')
+                answer_val = ans.get('answer', '')
+                if q_text in q_map:
+                    for mapping in q_map[q_text]:
+                        if mapping not in stats:
+                            stats[mapping] = {"sum": 0, "count": 0}
+                        if ans.get('type') in ['rating_3', 'rating_5'] and answer_val:
+                            try:
+                                stats[mapping]["sum"] += int(answer_val)
+                                stats[mapping]["count"] += 1
+                            except:
+                                pass
+        except:
+            pass
+    
+    low_outcomes = []
+    for code, data in stats.items():
+        if data["count"] > 0:
+            avg = data["sum"] / data["count"]
+            max_rating = 5
+            attainment = (avg / max_rating) * 100
+            if attainment < 70:
+                low_outcomes.append({
+                    "code": code,
+                    "attainment": round(attainment, 1),
+                    "avg_rating": round(avg, 2),
+                    "count": data["count"],
+                    "risk_level": "Critical" if attainment < 50 else "High" if attainment < 60 else "Medium"
+                })
+    
+    low_outcomes.sort(key=lambda x: x["attainment"])
+    return jsonify({"outcomes": low_outcomes[:8], "total_outcomes": len(stats)})
+
+@app.route('/api/suggest_followup_questions', methods=['POST'])
+def suggest_followup_questions():
+    if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
+    if not ai_provider: return jsonify({"questions": [], "source": "offline"})
+    
+    data = request.json or {}
+    form_id = data.get('form_id')
+    if not form_id:
+        return jsonify({"error": "form_id required"}), 400
+    
+    conn = get_db_connection(row_factory=True); c = conn.cursor()
+    c.execute("SELECT * FROM forms WHERE id = ?", (form_id,))
+    form_data = c.fetchone()
+    
+    if not form_data:
+        conn.close()
+        return jsonify({"error": "Form not found"}), 404
+    
+    course_name = form_data['course_name']
+    c.execute("SELECT full_text_for_ai, sentiment_label FROM responses WHERE form_id = ? AND full_text_for_ai IS NOT NULL", (form_id,))
+    feedback_rows = c.fetchall()
+    conn.close()
+    
+    feedback_texts = [r['full_text_for_ai'] for r in feedback_rows if r['full_text_for_ai'] and r['full_text_for_ai'].strip()]
+    if not feedback_texts:
+        return jsonify({"questions": [], "source": "no_feedback"})
+    
+    aggregated_feedback = "\n- ".join(feedback_texts[:20])
+    
+    prompt = (
+        "Based on the student feedback below, suggest 3-4 specific follow-up questions to dive deeper into the main themes and concerns. "
+        "Return STRICT JSON only in the form: {\"questions\":[{\"text\":\"...\",\"type\":\"rating_5\",\"required\":true}]}.\n\n"
+        "Context:\n"
+        f"Course: {course_name}\n"
+        f"Number of responses: {len(feedback_texts)}\n\n"
+        "Feedback:\n"
+        f"- {aggregated_feedback}\n\n"
+        "Guidelines for follow-up questions:\n"
+        "- Dig deeper into pain points or gaps mentioned\n"
+        "- Ask specific, actionable questions (not generic)\n"
+        "- Use rating_5 type for majority, mix with text for open-ended\n"
+        "- Keep questions concise (under 20 words)\n"
+        "- Focus on discrete topics (lab issues, teaching clarity, pace, etc.)"
+    )
+    
+    try:
+        raw = ai_generate_text("You suggest follow-up questions based on feedback. Return JSON only.", prompt)
+        followup = parse_ai_question_payload(raw, course_name)
+        if not followup:
+            return jsonify({"questions": [], "source": "parse_failed"})
+        return jsonify({"questions": followup[:4], "source": "ai"})
+    except Exception as e:
+        return jsonify({"questions": [], "source": "error", "error": str(e)})
 
 # --- ENGINE & EXPORTS ---
 def sort_key(k):

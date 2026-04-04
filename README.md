@@ -41,8 +41,10 @@ cp .env.example .env
 3. Start with Gunicorn:
 
 ```bash
-gunicorn --workers 3 --threads 2 --timeout 120 --bind 0.0.0.0:5050 wsgi:app
+gunicorn -c gunicorn.conf.py wsgi:app
 ```
+
+Or use the included `Procfile` on platforms like Render/Railway/Heroku.
 
 ## Required Environment Variables
 
@@ -56,6 +58,7 @@ gunicorn --workers 3 --threads 2 --timeout 120 --bind 0.0.0.0:5050 wsgi:app
 - `GEMINI_API_KEY`, `GEMINI_MODEL`
 - `GROQ_API_KEY`, `GROQ_MODEL`
 - `PORT`, `HOST`
+- `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `GUNICORN_TIMEOUT`, `GUNICORN_LOG_LEVEL`
 
 ## Health Check
 
@@ -76,5 +79,14 @@ https://your-domain.com/f/abcd1234ef56
 ```
 
 Students can submit directly from that link without selecting from the dropdown list.
+
+## Production Release Checklist
+
+- Set a strong `FLASK_SECRET_KEY` and real admin password.
+- Keep `.env` private and rotate any exposed API keys.
+- Configure one hosted LLM provider key (`GEMINI_API_KEY` or `GROQ_API_KEY`).
+- Run the app with Gunicorn (`wsgi:app`) behind HTTPS.
+- Verify `/healthz` in your deployment health checks.
+- Test admin login, form creation, share link (`/f/<token>`), and submission flow.
 
 

@@ -1,0 +1,54 @@
+[Unit]
+Description=AI Feedback Analyzer - NBA Outcomes Mapping
+After=network.target
+Wants=feedback-app.service
+
+[Service]
+Type=notify
+User=feedback-app
+Group=feedback-app
+WorkingDirectory=/opt/feedback-app
+Environment="PATH=/opt/feedback-app/venv/bin"
+Environment="FLASK_ENV=production"
+EnvironmentFile=/opt/feedback-app/.env
+EnvironmentFile=-/opt/feedback-app/.env.local
+
+# Prestart: ensure log directory
+ExecStartPre=/bin/mkdir -p /var/log/feedback-app
+ExecStartPre=/bin/chown feedback-app:feedback-app /var/log/feedback-app
+
+# Start: Gunicorn with 4 workers (adjust to 2 * CPU_count + 2)
+# Use --workers=4 for 2 CPU cores, --workers=10 for 4 CPU cores
+ExecStart=/opt/feedback-app/venv/bin/gunicorn \
+  --workers=4 \
+  --worker-class=sync \
+  --bind=127.0.0.1:5050 \
+  --timeout=120 \
+  --access-logfile=/var/log/feedback-app/access.log \
+  --error-logfile=/var/log/feedback-app/error.log \
+  --log-level=info \
+  wsgi:app
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Resource limits
+MemoryLimit=500M
+CPUQuota=80%
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/opt/feedback-app/instance /var/log/feedback-app
+
+# STDOUT/STDERR to journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=feedback-app
+
+[Install]
+WantedBy=multi-user.target

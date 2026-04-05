@@ -6,7 +6,7 @@ services:
     autoDeploy: true
     healthCheckPath: /healthz
     buildCommand: pip install -r requirements.txt && python -c "from app import init_db; init_db()"
-    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT --timeout 120 wsgi:app
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     envVars:
       - key: FLASK_ENV
         value: production
@@ -16,8 +16,6 @@ services:
         generateValue: true
       - key: HOST
         value: 0.0.0.0
-      - key: PORT
-        value: 10000
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD

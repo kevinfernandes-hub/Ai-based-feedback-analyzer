@@ -7,6 +7,7 @@ import uuid
 import re
 import logging
 import secrets
+import importlib
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, make_response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -17,6 +18,14 @@ from better_profanity import profanity
 from werkzeug.middleware.proxy_fix import ProxyFix
 from logging.handlers import RotatingFileHandler
 import os as os_module
+try:
+    psycopg2 = importlib.import_module("psycopg2")
+    psycopg2_extras = importlib.import_module("psycopg2.extras")
+    RealDictCursor = getattr(psycopg2_extras, "RealDictCursor", None)
+except Exception:
+    psycopg2 = None
+    RealDictCursor = None
+
 try:
     from groq import Groq
 except Exception:
@@ -32,7 +41,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 try:
-    import importlib
     _dotenv = importlib.import_module("dotenv")
     _load_dotenv = getattr(_dotenv, "load_dotenv", None)
     if callable(_load_dotenv):
@@ -89,10 +97,101 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 logging.basicConfig(level=logging.INFO)
 DB_PATH = os.path.join(app.instance_path, "feedback.db")
+DATABASE_URL = (os.getenv("DATABASE_URL", "") or "").strip()
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = f"postgresql://{DATABASE_URL[len('postgres://'):]}"
+USE_POSTGRES = bool(DATABASE_URL)
+
+if USE_POSTGRES and not psycopg2:
+    raise RuntimeError("DATABASE_URL is set but psycopg2 is not installed. Add psycopg2-binary to requirements.")
+
+DB_INTEGRITY_ERROR = (psycopg2.IntegrityError,) if USE_POSTGRES and psycopg2 else (sqlite3.IntegrityError,)
 STUDENT_SUBMITTER_COOKIE = "student_submitter_id"
 
 
+def _is_duplicate_column_error(exc):
+    message = str(exc or "").lower()
+    return "duplicate column" in message or "already exists" in message
+
+
+def _ensure_column(conn, cursor, table_name, column_name, column_definition):
+    if USE_POSTGRES:
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
+            (table_name, column_name),
+        )
+        if cursor.fetchone():
+            return
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+        return
+
+    try:
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+    except sqlite3.OperationalError as e:
+        if not _is_duplicate_column_error(e):
+            raise
+
+
+def _adapt_placeholders(query):
+    if USE_POSTGRES:
+        return query.replace("?", "%s")
+    return query
+
+
+class DbCursorAdapter:
+    def __init__(self, cursor, connection):
+        self._cursor = cursor
+        self._connection = connection
+
+    def execute(self, query, params=None):
+        statement = _adapt_placeholders(query)
+        if params is None:
+            return self._cursor.execute(statement)
+        return self._cursor.execute(statement, params)
+
+    def executemany(self, query, params_seq):
+        statement = _adapt_placeholders(query)
+        return self._cursor.executemany(statement, params_seq)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    @property
+    def connection(self):
+        return self._connection
+
+
+class DbConnectionAdapter:
+    def __init__(self, conn, row_factory=False):
+        self._conn = conn
+        self._row_factory = row_factory
+
+    def cursor(self):
+        if self._row_factory:
+            raw_cursor = self._conn.cursor(cursor_factory=RealDictCursor)
+        else:
+            raw_cursor = self._conn.cursor()
+        return DbCursorAdapter(raw_cursor, self)
+
+    def commit(self):
+        return self._conn.commit()
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def close(self):
+        return self._conn.close()
+
+
 def get_db_connection(row_factory=False):
+    if USE_POSTGRES:
+        connect_kwargs = {"connect_timeout": 10}
+        if "sslmode=" not in DATABASE_URL:
+            connect_kwargs["sslmode"] = "require"
+        conn = psycopg2.connect(DATABASE_URL, **connect_kwargs)
+        conn.autocommit = False
+        return DbConnectionAdapter(conn, row_factory=row_factory)
+
     conn = sqlite3.connect(DB_PATH, timeout=10)
     if row_factory:
         conn.row_factory = sqlite3.Row
@@ -652,24 +751,22 @@ COURSE_DATA_DB = {
 }
 
 def init_db():
-    os.makedirs(app.instance_path, exist_ok=True)
+    if not USE_POSTGRES:
+        os.makedirs(app.instance_path, exist_ok=True)
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS forms (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, course_name TEXT, structure TEXT, is_active BOOLEAN DEFAULT 1, created_at TEXT, start_at TEXT, end_at TEXT, public_token TEXT
-    )''')
-    try:
-        c.execute("ALTER TABLE forms ADD COLUMN start_at TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE forms ADD COLUMN end_at TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE forms ADD COLUMN public_token TEXT")
-    except sqlite3.OperationalError:
-        pass
+    if USE_POSTGRES:
+        c.execute('''CREATE TABLE IF NOT EXISTS forms (
+            id BIGSERIAL PRIMARY KEY, title TEXT, course_name TEXT, structure TEXT, is_active BOOLEAN DEFAULT TRUE, created_at TEXT, start_at TEXT, end_at TEXT, public_token TEXT
+        )''')
+    else:
+        c.execute('''CREATE TABLE IF NOT EXISTS forms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, course_name TEXT, structure TEXT, is_active BOOLEAN DEFAULT 1, created_at TEXT, start_at TEXT, end_at TEXT, public_token TEXT
+        )''')
+
+    _ensure_column(conn, c, "forms", "start_at", "TEXT")
+    _ensure_column(conn, c, "forms", "end_at", "TEXT")
+    _ensure_column(conn, c, "forms", "public_token", "TEXT")
 
     c.execute("SELECT id, public_token FROM forms")
     rows = c.fetchall()
@@ -684,17 +781,30 @@ def init_db():
         seen_tokens.add(new_token)
         c.execute("UPDATE forms SET public_token = ? WHERE id = ?", (new_token, form_id))
 
-    c.execute('''CREATE TABLE IF NOT EXISTS responses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER, form_title TEXT, student_name TEXT, attendance INTEGER, 
-        answers_json TEXT, full_text_for_ai TEXT, sentiment_score REAL, sentiment_label TEXT, timestamp TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS submission_locks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        form_id INTEGER NOT NULL,
-        submitter_key TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE(form_id, submitter_key)
-    )''')
+    if USE_POSTGRES:
+        c.execute('''CREATE TABLE IF NOT EXISTS responses (
+            id BIGSERIAL PRIMARY KEY, form_id INTEGER, form_title TEXT, student_name TEXT, attendance INTEGER,
+            answers_json TEXT, full_text_for_ai TEXT, sentiment_score DOUBLE PRECISION, sentiment_label TEXT, timestamp TEXT
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS submission_locks (
+            id BIGSERIAL PRIMARY KEY,
+            form_id INTEGER NOT NULL,
+            submitter_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(form_id, submitter_key)
+        )''')
+    else:
+        c.execute('''CREATE TABLE IF NOT EXISTS responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER, form_title TEXT, student_name TEXT, attendance INTEGER,
+            answers_json TEXT, full_text_for_ai TEXT, sentiment_score REAL, sentiment_label TEXT, timestamp TEXT
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS submission_locks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            form_id INTEGER NOT NULL,
+            submitter_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(form_id, submitter_key)
+        )''')
     conn.commit()
     conn.close()
 
@@ -725,7 +835,7 @@ def metrics():
         total_responses = c.fetchone()['count']
         c.execute("SELECT COUNT(*) as count FROM forms")
         total_forms = c.fetchone()['count']
-        c.execute("SELECT COUNT(*) as count FROM forms WHERE is_active = 1")
+        c.execute("SELECT COUNT(*) as count FROM forms WHERE is_active")
         active_forms = c.fetchone()['count']
         conn.close()
         return jsonify({
@@ -951,7 +1061,7 @@ def submit_feedback():
                 "INSERT INTO submission_locks (form_id, submitter_key, created_at) VALUES (?, ?, ?)",
                 (data.get('form_id'), submitter_key, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             )
-        except sqlite3.IntegrityError:
+        except DB_INTEGRITY_ERROR:
             conn.close()
             return jsonify({"status": "error", "message": "Duplicate submission blocked: this form was already submitted from this device/browser."}), 409
 

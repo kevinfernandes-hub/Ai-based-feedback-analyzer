@@ -132,7 +132,7 @@ def apply_security_headers(response):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' https://cdn.tailwindcss.com; img-src 'self' data: https:; font-src 'self'; connect-src 'self'"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://cdn.jsdelivr.net"
     response.headers["Cache-Control"] = "public, max-age=3600" if request.path.startswith('/static/') else "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     if IS_PRODUCTION:

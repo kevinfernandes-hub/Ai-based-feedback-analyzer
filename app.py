@@ -331,6 +331,7 @@ gemini_model = None
 gemini_client = None
 groq_client = None
 gemini_model_candidates = []
+_ai_initialized = False
 
 def load_gemini_candidates():
     if not genai or not gemini_client:
@@ -629,24 +630,30 @@ def sanitize_question_payload(questions, course_name=None):
 
     return sanitized
 
-try:
-    if GEMINI_API_KEY and genai:
-        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-        gemini_model_candidates = load_gemini_candidates()
-        initial_model = gemini_model_candidates[0] if gemini_model_candidates else GEMINI_MODEL
-        gemini_model = initial_model
-        ai_provider = "gemini"
-        print(f"✅ AI Online: Connected to Gemini ({initial_model})")
-    elif GROQ_API_KEY and Groq:
-        groq_client = Groq(api_key=GROQ_API_KEY)
-        ai_provider = "groq"
-        print(f"✅ AI Online: Connected to Groq ({GROQ_MODEL})")
-    else:
-        print("⚠️ AI Offline")
-except Exception as e:
-    ai_provider = None
+def get_ai_client():
+    global ai_provider, gemini_model, gemini_client, groq_client, gemini_model_candidates, _ai_initialized
+    if _ai_initialized:
+        return
+    _ai_initialized = True
+    try:
+        if GEMINI_API_KEY and genai:
+            gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+            gemini_model_candidates = load_gemini_candidates()
+            initial_model = gemini_model_candidates[0] if gemini_model_candidates else GEMINI_MODEL
+            gemini_model = initial_model
+            ai_provider = "gemini"
+            print(f"✅ AI Online: Connected to Gemini ({initial_model})")
+        elif GROQ_API_KEY and Groq:
+            groq_client = Groq(api_key=GROQ_API_KEY)
+            ai_provider = "groq"
+            print(f"✅ AI Online: Connected to Groq ({GROQ_MODEL})")
+        else:
+            print("⚠️ AI Offline")
+    except Exception as e:
+        ai_provider = None
 
 def ai_generate_text(system_prompt, user_prompt):
+    get_ai_client()
     if ai_provider == "gemini" and gemini_client:
         prompt = f"{system_prompt}\n\nUser Input:\n{user_prompt}"
         attempted = set()
